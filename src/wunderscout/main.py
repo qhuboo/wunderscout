@@ -458,11 +458,11 @@ def keypoint_detection_train():
     version = project.version(15)
     dataset = version.download("yolov8")
 
-    model_base_s = YOLO("yolo11x-pose.pt")
+    model_base_s = YOLO("yolo11m-pose.pt")
     results = model_base_s.train(
         data="./football-field-detection-15/data.yaml",
         save=True,
-        epochs=50,
+        epochs=300,
         plots=True,
         imgsz=1080,
         device=0,
@@ -471,30 +471,103 @@ def keypoint_detection_train():
     )
 
 
-def keypoint_detection(video_path):
-    model_trained = YOLO("./runs/keypoint_detect/train/weights/best.pt")
-
-    vertex_annotator = sv.VertexAnnotator(color=sv.Color.from_hex("#FF1493"), radius=8)
-
-    frame_generator = sv.get_video_frames_generator(video_path)
-    frame = next(frame_generator)
-
-    result = model_trained.predict(frame, conf=0.3)[0]
-
-    key_points = sv.KeyPoints.from_ultralytics(result)
-
-    filter = key_points.confidence[0] > 0.5
-    frame_reference_points = key_points.xy[0][filter]
-    frame_reference_key_points = sv.KeyPoints(
-        xy=frame_reference_points[np.newaxis, ...]
+def keypoint_detection_inference(video_path: str) -> None:
+    model = YOLO("./runs/keypoint_detect/train4/weights/best.pt")
+    vertex_annotator = sv.VertexAnnotator(
+        color=sv.Color.from_hex("#FF1493"),
+        radius=8,
     )
 
-    annotated_frame = frame.copy()
-    annotated_frame = vertex_annotator.annotate(
-        scene=annotated_frame, key_points=frame_reference_key_points
-    )
+    frame = next(sv.get_video_frames_generator(video_path))
+    res = model.predict(frame, conf=0.3, iou=0.7, imgsz=1088, verbose=False)[0]
 
-    cv2.imwrite("./runs/annotated_frame_keypoint.jpg", annotated_frame)
+    if res.boxes is None or len(res.boxes) == 0:
+        cv2.imwrite("./runs/annotated_frame_keypoint.jpg", frame)
+        return
+
+    best_i = int(np.argmax(res.boxes.conf.cpu().numpy()))
+
+    kxy = res.keypoints.xy[best_i].cpu().numpy()
+    kconf = res.keypoints.conf[best_i].cpu().numpy()
+
+    keep = kconf > 0.5
+    kxy = kxy[keep]
+
+    kp = sv.KeyPoints(xy=kxy[np.newaxis, ...])
+
+    out = vertex_annotator.annotate(scene=frame.copy(), key_points=kp)
+    cv2.imwrite("./runs/annotated_frame_keypoint.jpg", out)
+
+
+def keypoint_detection_indices(video_path, output_path="keypoint_debug.mp4"):
+    print(f"DEBUG: Starting keypoint visualization for {video_path}")
+
+    model_trained = YOLO("./runs/keypoint_detect/train4/weights/best.pt")
+
+    cap = cv2.VideoCapture(video_path)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    frame_count = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame_count += 1
+        if frame_count % 30 == 0:
+            print(f"Processing frame {frame_count}...")
+
+        result = model_trained.predict(frame, conf=0.5, verbose=False)[0]
+
+        if result.keypoints is not None and result.keypoints.xy.shape[0] > 0:
+            kpts_xy = result.keypoints.xy[0].cpu().numpy()
+            kpts_conf = result.keypoints.conf[0].cpu().numpy()
+
+            for i, (x, y) in enumerate(kpts_xy):
+                conf = kpts_conf[i]
+
+                if conf < 0.5 or (x == 0 and y == 0):
+                    continue
+
+                x, y = int(x), int(y)
+                cv2.circle(frame, (x, y), 5, (0, 0, 255), -1)
+                cv2.putText(
+                    frame,
+                    str(i + 1),
+                    (x + 10, y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 255),
+                    2,
+                )
+        else:
+            cv2.putText(
+                frame,
+                "NO PITCH DETECTED",
+                (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2,
+            )
+        out.write(frame)
+
+    cap.release()
+    out.release()
+    print("Video generation complete.")
+
+
+def keypoint_detection_val_test(model_path, data_yaml):
+    model = YOLO(model_path)
+    results = model.val(data=data_yaml, split="test", plots=True)
+
+    print(results)
 
 
 def main():
@@ -513,7 +586,12 @@ def main():
     # save_projection_plot_html(projections, clusters, crops)
     # inference_with_goalkeepers(video_path)
     # keypoint_detection_train()
-    keypoint_detection(video_path)
+    # keypoint_detection_inference(video_path)
+    keypoint_detection_indices(video_path)
+    # val_test(
+    #     "./runs/keypoint_detect/train4/weights/best.pt",
+    #     "./football-field-detection-15/data.yaml",
+    # )
 
 
 if __name__ == "__main__":

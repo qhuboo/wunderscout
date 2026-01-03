@@ -1,6 +1,12 @@
 {
   "venvPath": ".",
   "venv": ".venv",
+  "include": ["src"],
+  "executionEnvironments": [
+    {
+      "root": "src"
+    }
+  ],
   "python.pythonPath": "./.venv/bin/python",
   "python.analysis": {
     "typeCheckingMode": "none",

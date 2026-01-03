@@ -18,7 +18,10 @@ football-field-detection-15/
 
 # Output directories
 runs/
-heatmap/
+data/
+
+# Research scripts
+research/
 
 # Models
 *.pt

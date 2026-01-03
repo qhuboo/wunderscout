@@ -2019,9 +2019,9 @@ wheels = [
 ]
 
 [[package]]
-name = "yolo-torch"
+name = "wunderscout"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "ipython" },
     { name = "matplotlib" },
