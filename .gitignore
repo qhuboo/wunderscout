@@ -38,3 +38,6 @@ research/
 *.json
 !pyproject.toml
 !package.json
+
+# Config
+pyrightconfig.json
