@@ -13,24 +13,15 @@ wheels/
 # Env
 .env
 
-# Datasets
-football-players-detection-20/
-football-field-detection-15/
-
 # Output directories
 runs/
 data/
 
-# Research scripts
+# Local
 research/
+context/
 
-# Models
-*.pt
-
-# Videos
-*.mp4
-
-# Mac
+# OS Files
 .DS_Store
 
 # Large/Auto-generated data
