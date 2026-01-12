@@ -31,4 +31,3 @@ class TrackingResult:
             for f in sorted(self.frames.keys())
             if self.frames[f]["ball"] is not None
         ]
-
