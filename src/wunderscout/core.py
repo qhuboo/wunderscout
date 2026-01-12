@@ -6,6 +6,7 @@ from .vision import VisionEngine
 from .geometry import PitchMapper
 from .teams import TeamClassifier
 from .exporters import DataExporter
+from .data import TrackingResult
 
 
 class ScoutingPipeline:
@@ -14,7 +15,7 @@ class ScoutingPipeline:
         self.mapper = PitchMapper()
         self.classifier = TeamClassifier()
 
-    def run(self, video_path, output_video_path):
+    def run(self, video_path, output_video_path=None):
         # 1. Warm-up (Calibration)
         print("WORKER: Calibrating teams...")
         crops = self.engine.get_calibration_crops(video_path)
@@ -25,22 +26,21 @@ class ScoutingPipeline:
             print("WARNING: No player crops found for calibration.")
 
         # 2. Setup Video I/O
-        output_path_obj = Path(output_video_path)
-        output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-        # ---------------------------------------------------------------------
-
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        out = cv2.VideoWriter(
-            output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-        )
-
-        if not out.isOpened():
-            print(f"ERROR: Could not create video file at {output_video_path}")
-            return
+        out = None
+        if output_video_path:
+            output_path_obj = Path(output_video_path)
+            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+            out = cv2.VideoWriter(
+                output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+            )
+            if not out.isOpened():
+                print(f"ERROR: Could not create video file at {output_video_path}")
+                out = None
 
         tracker = sv.ByteTrack()
         tracking_results = {}
@@ -55,9 +55,9 @@ class ScoutingPipeline:
         print(f"WORKER: Starting processing: {video_path}")
         frame_generator = sv.get_video_frames_generator(video_path)
 
+        frame_idx = -1
         for frame_idx, frame in enumerate(frame_generator):
-            if frame_idx % 100 == 0:
-                print(f"WORKER: Processing frame {frame_idx}")
+            print(f"WORKER: Processing frame {frame_idx}")
 
             # --- A. DETECTION ---
             all_dets = self.engine.detect_players(frame)
@@ -143,22 +143,25 @@ class ScoutingPipeline:
                     )
 
             # --- G. DRAW & WRITE VIDEO ---
-            all_tracked = sv.Detections.merge(
-                [tracked_players, tracked_gks, tracked_refs]
-            )
-            annotated_frame = self.engine.draw_annotations(
-                frame, all_tracked, ball_detections
-            )
-            out.write(annotated_frame)
+            if out:
+                all_tracked = sv.Detections.merge(
+                    [tracked_players, tracked_gks, tracked_refs]
+                )
+                annotated_frame = self.engine.draw_annotations(
+                    frame, all_tracked, ball_detections
+                )
+                out.write(annotated_frame)
 
         # 4. Cleanup
-        out.release()
+        if out:
+            out.release()
+            print(f"WORKER: Video saved to {output_video_path}")
         cap.release()
-        print(f"WORKER: Video saved to {output_video_path}")
 
-        # Save CSVs
-        final_assignments = self.classifier.get_final_assignments()
-        csv_path = output_video_path.replace(".mp4", ".csv")
-        DataExporter.save_csvs(
-            tracking_results, final_assignments, frame_idx, fps, csv_path
+        # 5. Return data
+        return TrackingResult(
+            frames=tracking_results,
+            team_assignments=self.classifier.get_final_assignments(),
+            total_frames=frame_idx + 1,
+            fps=fps,
         )
