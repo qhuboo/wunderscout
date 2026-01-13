@@ -3,6 +3,7 @@ from .geometry import PitchMapper
 from .teams import TeamClassifier
 from .core import ScoutingPipeline
 from .exporters import DataExporter
+from .heatmaps import HeatmapGenerator
 
 __all__ = [
     "VisionEngine",
@@ -10,4 +11,5 @@ __all__ = [
     "TeamClassifier",
     "ScoutingPipeline",
     "DataExporter",
+    "HeatmapGenerator",
 ]
