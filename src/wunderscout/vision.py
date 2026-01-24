@@ -1,12 +1,10 @@
 import torch
 from ultralytics import YOLO
 import supervision as sv
-from transformers import AutoProcessor, SiglipVisionModel, data
+from transformers import AutoProcessor, SiglipVisionModel
 from roboflow import Roboflow
-from tqdm import tqdm
 from more_itertools import chunked
 import numpy as np
-from pathlib import Path
 
 
 class VisionEngine:

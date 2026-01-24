@@ -2,7 +2,7 @@ import numpy as np
 import json
 from scipy.stats import gaussian_kde
 from pathlib import Path
-from typing import Optional, Literal, Any
+from typing import Literal, Any
 from .data import TrackingResult
 
 

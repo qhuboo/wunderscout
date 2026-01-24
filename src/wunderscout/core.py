@@ -16,7 +16,7 @@ class Detector:
 
     def run(self, video_path, output_video_path=None):
         # 1. Warm-up (Calibration)
-        print("WORKER: Calibrating teams...")
+        print("Calibrating teams...")
         crops = self.engine.get_calibration_crops(video_path)
         if len(crops) > 0:
             embeddings = self.engine.get_embeddings(crops)
@@ -51,12 +51,12 @@ class Detector:
         REFEREE_ID = 3
 
         # 3. Main Processing Loop
-        print(f"WORKER: Starting processing: {video_path}")
+        print(f"Starting processing: {video_path}")
         frame_generator = sv.get_video_frames_generator(video_path)
 
         frame_idx = -1
         for frame_idx, frame in enumerate(frame_generator):
-            print(f"WORKER: Processing frame {frame_idx}")
+            print(f"Processing frame {frame_idx}")
 
             # --- A. DETECTION ---
             all_dets = self.engine.detect_players(frame)
@@ -154,7 +154,7 @@ class Detector:
         # 4. Cleanup
         if out:
             out.release()
-            print(f"WORKER: Video saved to {output_video_path}")
+            print(f"Video saved to {output_video_path}")
         cap.release()
 
         # 5. Return data
