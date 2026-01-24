@@ -268,4 +268,3 @@ class HeatmapGenerator:
 
         with open(output_path, "w") as f:
             json.dump(heatmap_data, f, indent=2 if pretty else None)
-

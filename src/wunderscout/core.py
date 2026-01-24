@@ -5,11 +5,10 @@ from pathlib import Path
 from .vision import VisionEngine
 from .geometry import PitchMapper
 from .teams import TeamClassifier
-from .exporters import DataExporter
 from .data import TrackingResult
 
 
-class ScoutingPipeline:
+class Detector:
     def __init__(self, player_weights, field_weights):
         self.engine = VisionEngine(player_weights, field_weights)
         self.mapper = PitchMapper()

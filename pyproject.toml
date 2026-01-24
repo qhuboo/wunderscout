@@ -28,6 +28,8 @@ dependencies = [
     "networkx>=3.5",
     "scipy>=1.16.2",
     "torch>=2.8.0",
+    "sentencepiece>=0.2.1",
+    "protobuf>=6.33.4",
 ]
 
 [tool.hatch.version]
