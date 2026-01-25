@@ -57,7 +57,7 @@ Main pipeline coordinator that orchestrates detection, tracking, and classificat
 **Methods:**
 - `run(video_path, output_video_path=None)`: Process video and return `TrackingResult`
 
-### VisionEngine
+### Models
 
 Handles YOLO detection and SiGLIP embedding extraction.
 
@@ -134,9 +134,9 @@ Data class containing tracking results.
 ## Training Custom Models
 
 ```python
-from wunderscout.vision import ScoutingTrainer
+from wunderscout import Trainer
 
-trainer = ScoutingTrainer(api_key="your_roboflow_api_key")
+trainer = Trainer(api_key="your_roboflow_api_key")
 
 # Train player detection model
 trainer.train_players(
