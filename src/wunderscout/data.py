@@ -8,6 +8,31 @@ class TrackingResult:
     total_frames: int
     fps: float
 
+    # frames shape
+    # {
+    #     0: {
+    #         "players": {
+    #             5: (0.234, 0.567),    # tracker_id: (normalized_x, normalized_y)
+    #             12: (0.789, 0.123),
+    #             ...
+    #         },
+    #         "ball": (0.5, 0.5) or None  # (normalized_x, normalized_y) or None
+    #     },
+    #     1: {
+    #         "players": {...},
+    #         "ball": ...
+    #     },
+    #     ...
+    # }
+
+    # team_assignments shape
+    # {
+    #     5: 0,     # tracker_id 5 -> Team 0
+    #     12: 1,    # tracker_id 12 -> Team 1
+    #     18: 0,
+    #     ...
+    # }
+
     def get_team_players(self, team: int) -> list[int]:
         """Get player IDs for a specific team (0 or 1)."""
         return [tid for tid, t in self.team_assignments.items() if t == team]

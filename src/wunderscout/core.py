@@ -2,7 +2,7 @@ import cv2
 import supervision as sv
 import numpy as np
 from pathlib import Path
-from .vision import VisionEngine
+from .models import Models
 from .geometry import PitchMapper
 from .teams import TeamClassifier
 from .data import TrackingResult
@@ -10,16 +10,16 @@ from .data import TrackingResult
 
 class Detector:
     def __init__(self, player_weights, field_weights):
-        self.engine = VisionEngine(player_weights, field_weights)
+        self.models = Models(player_weights, field_weights)
         self.mapper = PitchMapper()
         self.classifier = TeamClassifier()
 
     def run(self, video_path, output_video_path=None):
         # 1. Warm-up (Calibration)
         print("Calibrating teams...")
-        crops = self.engine.get_calibration_crops(video_path)
+        crops = self.models.get_calibration_crops(video_path)
         if len(crops) > 0:
-            embeddings = self.engine.get_embeddings(crops)
+            embeddings = self.models.get_embeddings(crops)
             self.classifier.fit(embeddings)
         else:
             print("WARNING: No player crops found for calibration.")
@@ -59,8 +59,8 @@ class Detector:
             print(f"Processing frame {frame_idx}")
 
             # --- A. DETECTION ---
-            all_dets = self.engine.detect_players(frame)
-            f_res = self.engine.detect_field(frame)
+            all_dets = self.models.detect_players(frame)
+            f_res = self.models.detect_field(frame)
 
             # --- B. FIELD HOMOGRAPHY ---
             H = None
@@ -93,7 +93,7 @@ class Detector:
             if len(tracked_players) > 0:
                 p_crops = [sv.crop_image(frame, xyxy) for xyxy in tracked_players.xyxy]
                 p_pil = [sv.cv2_to_pillow(c) for c in p_crops]
-                p_embeddings = self.engine.get_embeddings(p_pil)
+                p_embeddings = self.models.get_embeddings(p_pil)
 
                 final_team_ids = []
                 for i, tid in enumerate(tracked_players.tracker_id):
@@ -146,7 +146,7 @@ class Detector:
                 all_tracked = sv.Detections.merge(
                     [tracked_players, tracked_gks, tracked_refs]
                 )
-                annotated_frame = self.engine.draw_annotations(
+                annotated_frame = self.models.draw_annotations(
                     frame, all_tracked, ball_detections
                 )
                 out.write(annotated_frame)

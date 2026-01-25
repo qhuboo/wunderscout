@@ -7,7 +7,7 @@ from more_itertools import chunked
 import numpy as np
 
 
-class VisionEngine:
+class Models:
     def __init__(self, player_weights, field_weights, device=None):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.player_model = YOLO(player_weights)
@@ -51,7 +51,9 @@ class VisionEngine:
             frame_crops = [sv.crop_image(frame, xyxy) for xyxy in players.xyxy]
             crops += [sv.cv2_to_pillow(c) for c in frame_crops]
 
-        print(f"VisionEngine: Collected {len(crops)} calibration crops.")
+        print(
+            f"Models[detect_players][get_calibration_crops]: Collected {len(crops)} calibration crops."
+        )
         return crops
 
     def get_embeddings(self, pil_crops, batch_size=32):
@@ -102,7 +104,7 @@ class VisionEngine:
         return annotated_frame
 
 
-class ScoutingTrainer:
+class Trainer:
     def __init__(self, api_key):
         self.rf = Roboflow(api_key=api_key)
 
