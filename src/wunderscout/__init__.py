@@ -1,4 +1,4 @@
-from .vision import VisionEngine
+from .models import Models
 from .geometry import PitchMapper
 from .teams import TeamClassifier
 from .core import Detector
@@ -6,7 +6,7 @@ from .exporters import DataExporter
 from .heatmaps import HeatmapGenerator
 
 __all__ = [
-    "VisionEngine",
+    "Models",
     "PitchMapper",
     "TeamClassifier",
     "Detector",
