@@ -8,10 +8,12 @@ import numpy as np
 
 
 class Models:
-    def __init__(self, player_weights, field_weights, device=None):
+    def __init__(self, player_weights, field_weights):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.player_model = YOLO(player_weights)
+        self.player_model.to(self.device)
         self.field_model = YOLO(field_weights)
+        self.field_model.to(self.device)
 
         # Siglip for embeddings
         siglip_path = "google/siglip-base-patch16-224"
