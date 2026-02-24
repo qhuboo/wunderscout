@@ -9,7 +9,7 @@ import numpy as np
 
 class Models:
     def __init__(self, player_weights, field_weights):
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.player_model = YOLO(player_weights)
         self.player_model.to(self.device)
         self.field_model = YOLO(field_weights)
@@ -74,11 +74,15 @@ class Models:
         return np.concatenate(data_list) if data_list else np.array([])
 
     def detect_players(self, frame, conf=0.3):
-        result = self.player_model.predict(frame, conf=conf, verbose=False)[0]
+        result = self.player_model.predict(
+            frame, conf=conf, verbose=False, device=self.device
+        )[0]
         return sv.Detections.from_ultralytics(result)
 
     def detect_field(self, frame, conf=0.3):
-        result = self.field_model.predict(frame, conf=conf, verbose=False)[0]
+        result = self.field_model.predict(
+            frame, conf=conf, verbose=False, device=self.device
+        )[0]
         return result
 
     def draw_annotations(self, frame, all_detections, ball_detections):
