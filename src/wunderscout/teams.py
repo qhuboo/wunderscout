@@ -1,29 +1,24 @@
 import time
 import numpy as np
-import umap
 from sklearn.cluster import KMeans
 import supervision as sv
 
 
 class TeamClassifier:
     def __init__(self):
-        self.reducer = umap.UMAP(n_components=3)
         self.clusterer = KMeans(n_clusters=2, n_init=10, random_state=42)
         self.history = {}
 
     def fit(self, embeddings):
-        projections = self.reducer.fit_transform(embeddings)
-        self.clusterer.fit(projections)
+        self.clusterer.fit(embeddings)
 
     def get_consensus_team(self, tracker_id, embedding):
         t0 = time.time()
-        proj = self.reducer.transform(embedding.reshape(1, -1))
+        pred = self.clusterer.predict(embedding.reshape(1, -1))[0]
         t1 = time.time()
-        pred = self.clusterer.predict(proj)[0]
-        t2 = time.time()
 
         if t1 - t0 > 0.1:
-            print(f"  UMAP transform: {t1 - t0:.3f}s, KMeans: {t2 - t1:.3f}s")
+            print(f"Kmeans transform: {t1 - t0:.3f}s")
 
         if tracker_id not in self.history:
             self.history[tracker_id] = []
@@ -39,16 +34,10 @@ class TeamClassifier:
 
     def get_consensus_teams(self, tracker_ids, embeddings):
         t0 = time.time()
-        projections = self.reducer.transform(embeddings)
+        predictions = self.clusterer.predict(embeddings)
         t1 = time.time()
-        predictions = self.clusterer.predict(projections)
-        t2 = time.time()
 
-        print(
-            f"  Batch UMAP: {t1 - t0:.3f}s, "
-            f"Batch KMeans: {t2 - t1:.3f}s, "
-            f"players: {len(tracker_ids)}"
-        )
+        print(f"Batch KMeans: {t1 - t0:.3f}s, players: {len(tracker_ids)}")
 
         results = []
         for tid, pred in zip(tracker_ids, predictions):

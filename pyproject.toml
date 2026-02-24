@@ -20,7 +20,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "transformers>=4.56.1",
     "ultralytics>=8.3.193",
-    "umap-learn>=0.5.9.post2",
     "supervision>=0.26.1",
     "pandas>=2.3.2",
     "matplotlib>=3.10.6",
@@ -48,7 +47,6 @@ include = ["/README.md", "/src"]
 [tool.deptry.package_module_name_map]
 opencv-python = ["cv2"]
 scikit-learn = ["sklearn"]
-umap-learn = ["umap"]
 python-dotenv = ["dotenv"]
 
 [build-system]
