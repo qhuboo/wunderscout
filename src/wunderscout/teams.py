@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import umap
 from sklearn.cluster import KMeans
@@ -15,8 +16,14 @@ class TeamClassifier:
         self.clusterer.fit(projections)
 
     def get_consensus_team(self, tracker_id, embedding):
+        t0 = time.time()
         proj = self.reducer.transform(embedding.reshape(1, -1))
+        t1 = time.time()
         pred = self.clusterer.predict(proj)[0]
+        t2 = time.time()
+
+        if t1 - t0 > 0.1:
+            print(f"  UMAP transform: {t1 - t0:.3f}s, KMeans: {t2 - t1:.3f}s")
 
         if tracker_id not in self.history:
             self.history[tracker_id] = []
@@ -73,4 +80,3 @@ class TeamClassifier:
                 avg = sum(votes) / len(votes)
                 assignments[tid] = 1 if avg > 0.5 else 0
         return assignments
-
