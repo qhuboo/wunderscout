@@ -8,7 +8,7 @@ import numpy as np
 
 
 class Models:
-    def __init__(self, player_weights, field_weights):
+    def __init__(self, player_weights, field_weights, siglip_path=None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.player_model = YOLO(player_weights)
         self.player_model.to(self.device)
@@ -16,7 +16,7 @@ class Models:
         self.field_model.to(self.device)
 
         # Siglip for embeddings
-        siglip_path = "google/siglip-base-patch16-224"
+        siglip_path = siglip_path or "google/siglip-base-patch16-224"
         self.siglip_model = SiglipVisionModel.from_pretrained(siglip_path).to(
             self.device
         )
