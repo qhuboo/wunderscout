@@ -10,8 +10,8 @@ from .data import TrackingResult
 
 
 class Detector:
-    def __init__(self, player_weights, field_weights):
-        self.models = Models(player_weights, field_weights)
+    def __init__(self, player_weights, field_weights, siglip_path=None):
+        self.models = Models(player_weights, field_weights, siglip_path)
         self.mapper = PitchMapper()
         self.classifier = TeamClassifier()
 
