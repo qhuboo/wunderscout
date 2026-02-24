@@ -99,10 +99,9 @@ class Detector:
                 p_pil = [sv.cv2_to_pillow(c) for c in p_crops]
                 p_embeddings = self.models.get_embeddings(p_pil)
 
-                final_team_ids = []
-                for i, tid in enumerate(tracked_players.tracker_id):
-                    team_id = self.classifier.get_consensus_team(tid, p_embeddings[i])
-                    final_team_ids.append(team_id)
+                final_team_ids = self.classifier.get_consensus_teams(
+                    tracked_players.tracker_id, p_embeddings
+                )
 
                 tracked_players.class_id = np.array(final_team_ids)
 

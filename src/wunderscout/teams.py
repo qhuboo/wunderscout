@@ -37,6 +37,32 @@ class TeamClassifier:
             else 0
         )
 
+    def get_consensus_teams(self, tracker_ids, embeddings):
+        t0 = time.time()
+        projections = self.reducer.transform(embeddings)
+        t1 = time.time()
+        predictions = self.clusterer.predict(projections)
+        t2 = time.time()
+
+        print(
+            f"  Batch UMAP: {t1 - t0:.3f}s, "
+            f"Batch KMeans: {t2 - t1:.3f}s, "
+            f"players: {len(tracker_ids)}"
+        )
+
+        results = []
+        for tid, pred in zip(tracker_ids, predictions):
+            if tid not in self.history:
+                self.history[tid] = []
+            self.history[tid].append(int(pred))
+            if len(self.history[tid]) > 50:
+                self.history[tid].pop(0)
+
+            avg = sum(self.history[tid]) / len(self.history[tid])
+            results.append(1 if avg > 0.5 else 0)
+
+        return results
+
     def resolve_goalkeepers_team_id(self, players, goalkeepers):
         """
         Assigns goalkeepers to the team whose centroid is closest.
