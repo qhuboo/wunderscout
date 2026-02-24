@@ -1,3 +1,4 @@
+import time
 import cv2
 import supervision as sv
 import numpy as np
@@ -57,10 +58,12 @@ class Detector:
         frame_idx = -1
         for frame_idx, frame in enumerate(frame_generator):
             print(f"Processing frame {frame_idx}")
-
+            t0 = time.time()
             # --- A. DETECTION ---
             all_dets = self.models.detect_players(frame)
+            t1 = time.time()
             f_res = self.models.detect_field(frame)
+            t2 = time.time()
 
             # --- B. FIELD HOMOGRAPHY ---
             H = None
@@ -87,6 +90,7 @@ class Detector:
             tracked_gks = tracked_objects[tracked_objects.class_id == GOALKEEPER_ID]
             tracked_refs = tracked_objects[tracked_objects.class_id == REFEREE_ID]
 
+            t3 = time.time()
             # --- E. TEAM CLASSIFICATION ---
 
             # 1. Players
@@ -141,6 +145,7 @@ class Detector:
                         max(0.0, min(1.0, by)),
                     )
 
+            t4 = time.time()
             # --- G. DRAW & WRITE VIDEO ---
             if out:
                 all_tracked = sv.Detections.merge(
@@ -150,6 +155,19 @@ class Detector:
                     frame, all_tracked, ball_detections
                 )
                 out.write(annotated_frame)
+
+            t5 = time.time()
+
+            if frame_idx % 10 == 0:
+                print(
+                    f"Frame {frame_idx}: "
+                    f"player_det={t1 - t0:.3f}s, "
+                    f"field_det={t2 - t1:.3f}s, "
+                    f"tracking={t3 - t2:.3f}s, "
+                    f"classify={t4 - t3:.3f}s, "
+                    f"annotate={t5 - t4:.3f}s, "
+                    f"total={t5 - t0:.3f}s"
+                )
 
         # 4. Cleanup
         if out:
