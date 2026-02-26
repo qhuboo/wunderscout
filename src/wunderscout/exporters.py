@@ -5,11 +5,10 @@ from .data import TrackingResult
 
 class DataExporter:
     @staticmethod
-    def save_csvs(result: TrackingResult, output_path: str):
+    def save_csvs(result: TrackingResult, output_path: str) -> list[str]:
         """Export tracking data to CSV files (one per team)."""
-        path_obj = Path(output_path)
-        path_obj.parent.mkdir(parents=True, exist_ok=True)
-        base_name = str(path_obj.with_suffix(""))
+        out = Path(output_path)
+        out.mkdir(parents=True, exist_ok=True)
 
         team1_ids = result.get_team_players(0)
         team2_ids = result.get_team_players(1)
@@ -38,5 +37,12 @@ class DataExporter:
                     row.extend(data["ball"] if data["ball"] else ("NaN", "NaN"))
                     writer.writerow(row)
 
-        write_file(f"{base_name}_Team1.csv", "Team1", sorted(team1_ids))
-        write_file(f"{base_name}_Team2.csv", "Team2", sorted(team2_ids))
+        created = []
+
+        write_file(out / "Team1.csv", "Team1", sorted(team1_ids))
+        created.append(str(out / "Team1.csv"))
+
+        write_file(out / "Team2.csv", "Team2", sorted(team2_ids))
+        created.append(str(out / "Team2.csv"))
+
+        return created
