@@ -51,72 +51,6 @@ class HeatmapGenerator:
         # Using 1cm as minimum threshold
         return x_range > 0.01 and y_range > 0.01
 
-    def generate_player_heatmap(
-        self,
-        result: TrackingResult,
-        player_id: int,
-        method: Literal["histogram", "kde", "both"] = "both",
-    ) -> dict[str, Any]:
-        """
-        Generate heatmap for a single player.
-
-        Args:
-            result: TrackingResult from pipeline
-            player_id: Player tracker ID
-            method: "histogram", "kde", or "both"
-
-        Returns:
-            Dictionary with heatmap data in format ready for JSON export
-        """
-        trajectory = result.get_player_trajectory(player_id)
-
-        if len(trajectory) == 0:
-            raise ValueError(f"No trajectory data found for player {player_id}")
-
-        positions = np.array(trajectory)
-        positions_meters = self._scale_to_meters(positions)
-
-        x, y = positions_meters[:, 0], positions_meters[:, 1]
-
-        output: dict[str, Any] = {
-            "player_id": player_id,
-            "sample_count": len(trajectory),
-        }
-
-        # Always try histogram (works with any amount of data)
-        if method in ["histogram", "both"]:
-            try:
-                histogram_result = self._compute_histogram(x, y)
-                output["histogram"] = histogram_result
-            except Exception as e:
-                print(f"Warning: Histogram failed for player {player_id}: {e}")
-                # Don't include histogram key at all if it fails
-
-        # Only attempt KDE if we have enough quality data
-        if method in ["kde", "both"]:
-            if len(trajectory) < self.min_samples_for_kde:
-                print(
-                    f"Info: Player {player_id} has only {len(trajectory)} samples "
-                    f"(minimum {self.min_samples_for_kde} required for KDE). "
-                    f"Skipping KDE, histogram only."
-                )
-                # Don't include kde key at all
-            elif not self._has_sufficient_variation(x, y):
-                print(
-                    f"Info: Player {player_id} has insufficient spatial variation "
-                    f"for KDE. Skipping KDE, histogram only."
-                )
-                # Don't include kde key at all
-            else:
-                try:
-                    kde_result = self._compute_kde(x, y)
-                    output["kde"] = kde_result
-                except Exception as e:
-                    print(f"Warning: KDE failed for player {player_id}: {e}")
-                    # Don't include kde key at all if it fails
-
-        return output
-
     def _compute_histogram(self, x: np.ndarray, y: np.ndarray) -> dict[str, Any]:
         """Compute 2D histogram heatmap."""
         heatmap, xedges, yedges = np.histogram2d(
@@ -165,7 +99,7 @@ class HeatmapGenerator:
             "values": Z.tolist(),
         }
 
-    def generate_team_heatmap(
+    def team(
         self,
         result: TrackingResult,
         team: int,
@@ -233,7 +167,73 @@ class HeatmapGenerator:
 
         return output
 
-    def generate_all_players_heatmaps(
+    def player(
+        self,
+        result: TrackingResult,
+        player_id: int,
+        method: Literal["histogram", "kde", "both"] = "both",
+    ) -> dict[str, Any]:
+        """
+        Generate heatmap for a single player.
+
+        Args:
+            result: TrackingResult from pipeline
+            player_id: Player tracker ID
+            method: "histogram", "kde", or "both"
+
+        Returns:
+            Dictionary with heatmap data in format ready for JSON export
+        """
+        trajectory = result.get_player_trajectory(player_id)
+
+        if len(trajectory) == 0:
+            raise ValueError(f"No trajectory data found for player {player_id}")
+
+        positions = np.array(trajectory)
+        positions_meters = self._scale_to_meters(positions)
+
+        x, y = positions_meters[:, 0], positions_meters[:, 1]
+
+        output: dict[str, Any] = {
+            "player_id": player_id,
+            "sample_count": len(trajectory),
+        }
+
+        # Always try histogram (works with any amount of data)
+        if method in ["histogram", "both"]:
+            try:
+                histogram_result = self._compute_histogram(x, y)
+                output["histogram"] = histogram_result
+            except Exception as e:
+                print(f"Warning: Histogram failed for player {player_id}: {e}")
+                # Don't include histogram key at all if it fails
+
+        # Only attempt KDE if we have enough quality data
+        if method in ["kde", "both"]:
+            if len(trajectory) < self.min_samples_for_kde:
+                print(
+                    f"Info: Player {player_id} has only {len(trajectory)} samples "
+                    f"(minimum {self.min_samples_for_kde} required for KDE). "
+                    f"Skipping KDE, histogram only."
+                )
+                # Don't include kde key at all
+            elif not self._has_sufficient_variation(x, y):
+                print(
+                    f"Info: Player {player_id} has insufficient spatial variation "
+                    f"for KDE. Skipping KDE, histogram only."
+                )
+                # Don't include kde key at all
+            else:
+                try:
+                    kde_result = self._compute_kde(x, y)
+                    output["kde"] = kde_result
+                except Exception as e:
+                    print(f"Warning: KDE failed for player {player_id}: {e}")
+                    # Don't include kde key at all if it fails
+
+        return output
+
+    def all_players(
         self,
         result: TrackingResult,
         method: Literal["histogram", "kde", "both"] = "both",
@@ -256,7 +256,7 @@ class HeatmapGenerator:
 
         return all_heatmaps
 
-    def save_heatmap(
+    def save(
         self,
         heatmap_data: dict[str, Any],
         output_path: str,
