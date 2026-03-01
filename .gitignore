@@ -13,7 +13,7 @@ wheels/
 # Env
 .env
 
-# AI stuff
+# AI context
 generate_context.sh
 context.md
 
@@ -32,3 +32,6 @@ context/
 
 # Config
 pyrightconfig.json
+
+# pytest
+
