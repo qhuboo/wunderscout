@@ -13,10 +13,9 @@ wheels/
 # Env
 .env
 
-# Output directories
-runs/
-data/
-content.md
+# AI stuff
+generate_context.sh
+context.md
 
 # Local
 research/
