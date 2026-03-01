@@ -1,9 +1,12 @@
-import numpy as np
+import logging
 import json
 from scipy.stats import gaussian_kde
+import numpy as np
 from pathlib import Path
 from typing import Literal, Any
 from .data import TrackingResult
+
+logger = logging.getLogger(__name__)
 
 
 class HeatmapGenerator:
@@ -248,9 +251,7 @@ class HeatmapGenerator:
 
         for player_id in result.get_all_player_ids():
             try:
-                all_heatmaps[player_id] = self.generate_player_heatmap(
-                    result, player_id, method
-                )
+                all_heatmaps[player_id] = self.player(result, player_id, method)
             except ValueError as e:
                 print(f"Warning: Skipping player {player_id}: {e}")
 

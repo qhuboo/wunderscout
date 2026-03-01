@@ -13,10 +13,9 @@ wheels/
 # Env
 .env
 
-# Output directories
-runs/
-data/
-content.md
+# AI context
+generate_context.sh
+context.md
 
 # Local
 research/
@@ -33,3 +32,6 @@ context/
 
 # Config
 pyrightconfig.json
+
+# pytest
+
