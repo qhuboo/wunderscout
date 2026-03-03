@@ -37,7 +37,7 @@ def set_stream_logger(name="wunderscout", level=logging.DEBUG, format_string=Non
     :param format_string: Log message format
     """
     if format_string is None:
-        format_string = "%(asctime)s %(name)s [%(levelname)s] %(message)s"
+        format_string = "[%(asctime)s] [%(levelname)s] [%(module)s] [%(funcName)s] [%(lineno)d] %(message)s"
 
     logger = logging.getLogger(name)
     logger.setLevel(level)

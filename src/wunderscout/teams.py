@@ -1,7 +1,10 @@
+import logging
 import time
 import numpy as np
 from sklearn.cluster import KMeans
 import supervision as sv
+
+logger = logging.getLogger(__name__)
 
 
 class TeamClassifier:
@@ -13,12 +16,7 @@ class TeamClassifier:
         self.clusterer.fit(embeddings)
 
     def get_consensus_team(self, tracker_id, embedding):
-        t0 = time.time()
         pred = self.clusterer.predict(embedding.reshape(1, -1))[0]
-        t1 = time.time()
-
-        if t1 - t0 > 0.1:
-            print(f"Kmeans transform: {t1 - t0:.3f}s")
 
         if tracker_id not in self.history:
             self.history[tracker_id] = []
@@ -33,11 +31,9 @@ class TeamClassifier:
         )
 
     def get_consensus_teams(self, tracker_ids, embeddings):
-        t0 = time.time()
         predictions = self.clusterer.predict(embeddings)
-        t1 = time.time()
 
-        print(f"Batch KMeans: {t1 - t0:.3f}s, players: {len(tracker_ids)}")
+        logger.debug(f"predictions: {predictions}")
 
         results = []
         for tid, pred in zip(tracker_ids, predictions):
@@ -50,23 +46,29 @@ class TeamClassifier:
             avg = sum(self.history[tid]) / len(self.history[tid])
             results.append(1 if avg > 0.5 else 0)
 
+        logger.debug(f"results: {results}")
+
         return results
 
     def resolve_goalkeepers_team_id(self, players, goalkeepers):
         """
         Assigns goalkeepers to the team whose centroid is closest.
-        players: sv.Detections (already classified with class_id 0 or 1)
+        players: sv.Detections
         goalkeepers: sv.Detections
         """
         if len(players) == 0 or len(goalkeepers) == 0:
             return np.array([0] * len(goalkeepers))
 
         players_xy = players.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+        logger.debug(f"player anchors: {players_xy}")
         goalkeepers_xy = goalkeepers.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+        logger.debug(f"goalkeeper anchors: {goalkeepers_xy}")
 
         # Calculate centroids for Team 0 and Team 1
-        team_0_mask = players.class_id == 0
-        team_1_mask = players.class_id == 1
+        team_0_mask = players.data["team_id"] == 0
+        logger.debug(f"team_0_mask: {team_0_mask}")
+        team_1_mask = players.data["team_id"] == 1
+        logger.debug(f"team_1_mask: {team_1_mask}")
 
         # Handle cases where one team might not be detected yet
         if np.any(team_0_mask):
@@ -77,7 +79,7 @@ class TeamClassifier:
         if np.any(team_1_mask):
             team_1_centroid = players_xy[team_1_mask].mean(axis=0)
         else:
-            team_1_centroid = np.array([10000, 10000])  # Far away
+            team_1_centroid = np.array([10000, 10000])
 
         goalkeepers_team_id = []
 

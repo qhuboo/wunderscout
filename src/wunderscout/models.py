@@ -1,3 +1,4 @@
+import logging
 import torch
 from ultralytics import YOLO
 import supervision as sv
@@ -5,6 +6,8 @@ from transformers import AutoProcessor, SiglipVisionModel
 from roboflow import Roboflow
 from more_itertools import chunked
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class Models:
@@ -15,32 +18,13 @@ class Models:
         self.field_model = YOLO(field_weights)
         self.field_model.to(self.device)
 
-        # Siglip for embeddings
         siglip_path = siglip_path or "google/siglip-base-patch16-224"
         self.siglip_model = SiglipVisionModel.from_pretrained(siglip_path).to(
             self.device
         )
         self.siglip_processor = AutoProcessor.from_pretrained(siglip_path)
 
-        # --- Annotators ---
-        # Palette: 0=Blue, 1=Pink, 2=Yellow (Referee)
-        self.palette = sv.ColorPalette.from_hex(["#00BFFF", "#FF1493", "#FFD700"])
-
-        self.ellipse_annotator = sv.EllipseAnnotator(
-            color=self.palette,
-            thickness=2,
-        )
-        self.label_annotator = sv.LabelAnnotator(
-            color=self.palette,
-            text_color=sv.Color.from_hex("#000000"),
-            text_position=sv.Position.BOTTOM_CENTER,
-        )
-        self.triangle_annotator = sv.TriangleAnnotator(
-            color=sv.Color.from_hex("#FFD700"), base=25, height=21, outline_thickness=1
-        )
-
-    def get_calibration_crops(self, video_path, stride=30):
-        PLAYER_ID = 2
+    def get_calibration_crops(self, video_path, class_id, stride=30):
         frame_generator = sv.get_video_frames_generator(
             source_path=video_path, stride=stride
         )
@@ -48,14 +32,10 @@ class Models:
         crops = []
         for frame in frame_generator:
             detections = self.detect_players(frame)
-            # Filter for players only for calibration
-            players = detections[detections.class_id == PLAYER_ID]
+            players = detections[detections.class_id == class_id]
             frame_crops = [sv.crop_image(frame, xyxy) for xyxy in players.xyxy]
             crops += [sv.cv2_to_pillow(c) for c in frame_crops]
 
-        print(
-            f"Models[detect_players][get_calibration_crops]: Collected {len(crops)} calibration crops."
-        )
         return crops
 
     def get_embeddings(self, pil_crops, batch_size=32):
@@ -73,13 +53,13 @@ class Models:
 
         return np.concatenate(data_list) if data_list else np.array([])
 
-    def detect_players(self, frame, conf=0.3):
+    def detect_players(self, frame, conf=0.0):
         result = self.player_model.predict(
             frame, conf=conf, verbose=False, device=self.device
         )[0]
         return sv.Detections.from_ultralytics(result)
 
-    def detect_field(self, frame, conf=0.3):
+    def detect_field(self, frame, conf=0.0):
         result = self.field_model.predict(
             frame, conf=conf, verbose=False, device=self.device
         )[0]

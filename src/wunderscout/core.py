@@ -1,12 +1,19 @@
-import time
-import cv2
+import logging
 import supervision as sv
 import numpy as np
-from pathlib import Path
+
+from wunderscout import data
 from .models import Models
 from .geometry import PitchMapper
 from .teams import TeamClassifier
-from .data import TrackingResult
+
+logger = logging.getLogger(__name__)
+
+# Class ID constants
+BALL_ID = 0
+GOALKEEPER_ID = 1
+PLAYER_ID = 2
+REFEREE_ID = 3
 
 
 class Detector:
@@ -15,55 +22,25 @@ class Detector:
         self.mapper = PitchMapper()
         self.classifier = TeamClassifier()
 
-    def run(self, video_path, output_video_path=None):
-        # 1. Warm-up (Calibration)
-        print("Calibrating teams...")
-        crops = self.models.get_calibration_crops(video_path)
+    def run(self, video_path):
+        crops = self.models.get_calibration_crops(video_path, class_id=PLAYER_ID)
         if len(crops) > 0:
             embeddings = self.models.get_embeddings(crops)
             self.classifier.fit(embeddings)
         else:
-            print("WARNING: No player crops found for calibration.")
-
-        # 2. Setup Video I/O
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        out = None
-        if output_video_path:
-            output_path_obj = Path(output_video_path)
-            output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-            out = cv2.VideoWriter(
-                output_video_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-            )
-            if not out.isOpened():
-                print(f"ERROR: Could not create video file at {output_video_path}")
-                out = None
+            logger.warning("WARNING: No player crops found for calibration.")
 
         tracker = sv.ByteTrack()
-        tracking_results = {}
-
-        # ID Constants
-        BALL_ID = 0
-        GOALKEEPER_ID = 1
-        PLAYER_ID = 2
-        REFEREE_ID = 3
+        frames = []
 
         # 3. Main Processing Loop
-        print(f"Starting processing: {video_path}")
+        logger.info(f"Starting processing: {video_path}")
         frame_generator = sv.get_video_frames_generator(video_path)
-
-        frame_idx = -1
         for frame_idx, frame in enumerate(frame_generator):
-            print(f"Processing frame {frame_idx}")
-            t0 = time.time()
+            logger.info(f"Processing frame {frame_idx}")
             # --- A. DETECTION ---
             all_dets = self.models.detect_players(frame)
-            t1 = time.time()
             f_res = self.models.detect_field(frame)
-            t2 = time.time()
 
             # --- B. FIELD HOMOGRAPHY ---
             H = None
@@ -74,6 +51,8 @@ class Detector:
                 )
             else:
                 H = self.mapper.last_h
+
+            logger.debug(f"H: {H}")
 
             # --- C. SEPARATE BALL & OTHERS ---
             ball_detections = all_dets[all_dets.class_id == BALL_ID]
@@ -88,9 +67,7 @@ class Detector:
             # Split tracked objects
             tracked_players = tracked_objects[tracked_objects.class_id == PLAYER_ID]
             tracked_gks = tracked_objects[tracked_objects.class_id == GOALKEEPER_ID]
-            tracked_refs = tracked_objects[tracked_objects.class_id == REFEREE_ID]
 
-            t3 = time.time()
             # --- E. TEAM CLASSIFICATION ---
 
             # 1. Players
@@ -103,81 +80,58 @@ class Detector:
                     tracked_players.tracker_id, p_embeddings
                 )
 
-                tracked_players.class_id = np.array(final_team_ids)
+                tracked_players.data["team_id"] = np.array(final_team_ids)
+
+            else:
+                tracked_players.data["team_id"] = np.array([], dtype=int)
 
             # 2. Goalkeepers
             if len(tracked_gks) > 0 and len(tracked_players) > 0:
-                tracked_gks.class_id = self.classifier.resolve_goalkeepers_team_id(
-                    tracked_players, tracked_gks
+                tracked_gks.data["team_id"] = (
+                    self.classifier.resolve_goalkeepers_team_id(
+                        tracked_players, tracked_gks
+                    )
                 )
 
-            # 3. Referees (Shift ID 3 -> 2)
-            if len(tracked_refs) > 0:
-                tracked_refs.class_id -= 1
+            else:
+                tracked_gks.data["team_id"] = np.array(
+                    [-1] * len(tracked_gks), dtype=int
+                )
+
+            # 3. Ball
+            ball_detections.data["team_id"] = np.array(
+                [-1] * len(ball_detections), dtype=int
+            )
 
             # --- F. DATA STORAGE ---
-            tracking_results[frame_idx] = {"players": {}, "ball": None}
             data_targets = sv.Detections.merge([tracked_players, tracked_gks])
 
-            if H is not None:
-                if len(data_targets) > 0:
-                    feet_coords = data_targets.get_anchors_coordinates(
-                        sv.Position.BOTTOM_CENTER
-                    )
-                    transformed_feet = self.mapper.transform(feet_coords, H)
-
-                    for i, tid in enumerate(data_targets.tracker_id):
-                        px, py = transformed_feet[i]
-                        tracking_results[frame_idx]["players"][tid] = (
-                            max(0.0, min(1.0, px)),
-                            max(0.0, min(1.0, py)),
-                        )
-
-                if len(ball_detections) > 0:
-                    ball_coords = ball_detections.get_anchors_coordinates(
-                        sv.Position.CENTER
-                    )
-                    transformed_ball = self.mapper.transform([ball_coords[0]], H)
-                    bx, by = transformed_ball[0]
-                    tracking_results[frame_idx]["ball"] = (
-                        max(0.0, min(1.0, bx)),
-                        max(0.0, min(1.0, by)),
+            if len(data_targets) > 0:
+                if H is not None:
+                    data_targets.data["pitch_coordinates"] = self.mapper.transform(
+                        data_targets.get_anchors_coordinates(sv.Position.BOTTOM_CENTER),
+                        H,
                     )
 
-            t4 = time.time()
-            # --- G. DRAW & WRITE VIDEO ---
-            if out:
-                all_tracked = sv.Detections.merge(
-                    [tracked_players, tracked_gks, tracked_refs]
-                )
-                annotated_frame = self.models.draw_annotations(
-                    frame, all_tracked, ball_detections
-                )
-                out.write(annotated_frame)
+                else:
+                    data_targets.data["pitch_coordinates"] = np.full(
+                        (len(data_targets), 2), np.nan
+                    )
+            else:
+                data_targets.data["pitch_coordinates"] = np.full((0, 2), np.nan)
 
-            t5 = time.time()
+            if len(ball_detections) > 0:
+                if H is not None:
+                    ball_detections.data["pitch_coordinates"] = self.mapper.transform(
+                        ball_detections.get_anchors_coordinates(sv.Position.CENTER), H
+                    )
+                else:
+                    ball_detections.data["pitch_coordinates"] = np.full(
+                        (len(ball_detections), 2), np.nan
+                    )
+            else:
+                ball_detections.data["pitch_coordinates"] = np.full((0, 2), np.nan)
 
-            if frame_idx % 10 == 0:
-                print(
-                    f"Frame {frame_idx}: "
-                    f"player_det={t1 - t0:.3f}s, "
-                    f"field_det={t2 - t1:.3f}s, "
-                    f"tracking={t3 - t2:.3f}s, "
-                    f"classify={t4 - t3:.3f}s, "
-                    f"annotate={t5 - t4:.3f}s, "
-                    f"total={t5 - t0:.3f}s"
-                )
+            frames.append(sv.Detections.merge([data_targets, ball_detections]))
 
-        # 4. Cleanup
-        if out:
-            out.release()
-            print(f"Video saved to {output_video_path}")
-        cap.release()
-
-        # 5. Return data
-        return TrackingResult(
-            frames=tracking_results,
-            team_assignments=self.classifier.get_final_assignments(),
-            total_frames=frame_idx + 1,
-            fps=fps,
-        )
+        return frames
