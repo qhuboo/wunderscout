@@ -1,5 +1,4 @@
 import logging
-import time
 import numpy as np
 from sklearn.cluster import KMeans
 import supervision as sv

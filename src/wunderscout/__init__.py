@@ -3,8 +3,7 @@ from .models import Models
 from .geometry import PitchMapper
 from .teams import TeamClassifier
 from .core import Detector
-from .exporters import DataExporter
-from .heatmaps import HeatmapGenerator
+from .heatmaps import HeatmapGenerator, Heatmap, HeatmapKey
 
 logging.getLogger("wunderscout").addHandler(logging.NullHandler())
 
@@ -13,8 +12,9 @@ __all__ = [
     "PitchMapper",
     "TeamClassifier",
     "Detector",
-    "DataExporter",
     "HeatmapGenerator",
+    "Heatmap",
+    "HeatmapKey",
 ]
 
 
