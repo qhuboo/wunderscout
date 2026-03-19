@@ -1,12 +1,11 @@
-import csv
 from pathlib import Path
-from dataclasses import dataclass, field
 import logging
 import supervision as sv
 import numpy as np
-from torch import NoneType
+import cv2
 
-from wunderscout.types import SaveResult
+from wunderscout.exceptions import CalibrationError, VideoProcessingError
+from wunderscout.types import ClassId, Frames
 
 from .models import Models
 from .geometry import PitchMapper
@@ -14,138 +13,106 @@ from .teams import TeamClassifier
 
 logger = logging.getLogger(__name__)
 
-# Class ID constants
-BALL_ID = 0
-GOALKEEPER_ID = 1
-PLAYER_ID = 2
-REFEREE_ID = 3
-
-
-@dataclass
-class Frames:
-    detections: list[sv.Detections]
-    _player_team_map: dict[int, int] = field(init=False)
-
-    def __post_init__(self):
-        self._player_team_map = self._build_player_team_map()
-
-    def _build_player_team_map(self):
-        merged = sv.Detections.merge(self.detections)
-        if merged.tracker_id is None:
-            return {}
-
-        all_players = merged[merged.class_id == PLAYER_ID]
-
-        player_team_map = {
-            int(tracker_id): int(team_id)
-            for tracker_id, team_id in zip(
-                all_players.tracker_id, all_players.data["team_id"]
-            )
-        }
-
-        return player_team_map
-
-    def get_all_player_ids(self):
-        return list(self._player_team_map.keys())
-
-    def get_all_team_ids(self):
-        return list(set(self._player_team_map.values()))
-
-    def get_team_for_player(self, player_id: int):
-        return self._player_team_map[player_id]
-
-    def save_csvs(self, output_path: str | Path) -> SaveResult:
-        """Export tracking data to CSV files (one per team)."""
-        path_obj = Path(output_path)
-        path_obj.mkdir(parents=True, exist_ok=True)
-
-        team_ids = list(self.get_all_team_ids())
-        team_players = {
-            team_id: [
-                pid for pid, tid in self._player_team_map.items() if tid == team_id
-            ]
-            for team_id in team_ids
-        }
-
-        def write_file(path, team_name, player_ids):
-            with open(path, "w", newline="") as f:
-                writer = csv.writer(f)
-
-                # Row 1: Team names
-                writer.writerow(
-                    ["", "", ""]
-                    + [item for _ in player_ids for item in (team_name, "")]
-                    + ["", ""]
-                )
-                writer.writerow(
-                    ["", "", ""]
-                    + [item for pid in player_ids for item in (str(pid), "")]
-                    + ["", ""]
-                )
-                writer.writerow(
-                    ["Period", "Frame", "Time [s]"]
-                    + [item for pid in player_ids for item in (f"Player{pid}", "")]
-                    + ["Ball", ""]
-                )
-
-                for f_idx, detection in enumerate(self.detections):
-                    # period, frame, time
-                    row = [1, f_idx, ""]
-
-                    # Get player positions
-                    for player_id in player_ids:
-                        if detection.tracker_id is not None:
-                            mask = detection.tracker_id == player_id
-                            if mask.any():
-                                idx = np.where(mask)[0][0]
-                                coords = detection.data["pitch_coordinates"][idx]
-                                row.extend([f"{coords[0]:.5f}", f"{coords[1]:.5f}"])
-                            else:
-                                row.extend(["NaN", "NaN"])
-                        else:
-                            row.extend(["NaN", "NaN"])
-
-                    # Get ball position
-                    ball_mask = detection.class_id == BALL_ID
-                    if ball_mask.any():
-                        idx = np.where(ball_mask)[0][0]
-                        coords = detection.data["pitch_coordinates"][idx]
-                        row.extend([f"{coords[0]:.5f}", f"{coords[1]:.5f}"])
-                    else:
-                        row.extend(["NaN", "NaN"])
-
-                    writer.writerow(row)
-
-        save_result = SaveResult()
-
-        for team_id in team_ids:
-            path = path_obj / f"team_{team_id}.csv"
-            try:
-                write_file(path, f"Team{team_id}", team_players[team_id])
-                save_result.successful_paths.append(path)
-            except Exception as e:
-                error_msg = f"Unexpected error saving Team{team_id}.csv: {e}"
-                logger.warning(f"Error: {error_msg}")
-                save_result.errors.append(str(error_msg))
-                save_result.failed_paths.append(path)
-
-        return save_result
-
 
 class Detector:
     def __init__(self, models: Models):
         self.models = models
         self.mapper = PitchMapper()
         self.classifier = TeamClassifier()
+        self._is_calibrated = False
+
+    def _validate_video(
+        self, video_path: str | Path
+    ) -> tuple[int, float, tuple[int, int]]:
+        """
+        Validate video can be opened and read.
+        Returns: tuple: (frame_count, fps, (width, height))
+        Raises: VideoProcessingError: If video cannot be opened.
+        """
+        logger.info("Validating video...")
+
+        video_path = Path(video_path)
+        if not video_path.exists():
+            raise VideoProcessingError(f"Video file not found: {video_path}")
+
+        cap = cv2.VideoCapture(str(video_path))
+
+        if not cap.isOpened():
+            raise VideoProcessingError(f"Cannot open video file: {video_path}")
+
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        # Test reading first frame
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            raise VideoProcessingError(f"Cannot open video file: {video_path}")
+
+        logger.debug(
+            f"Video validated: {frame_count} frames, {fps:.1f} fps, {width}x{height}"
+        )
+
+        return frame_count, fps, (width, height)
+
+    def _calibrate(self, video_path: str | Path) -> None:
+        """
+        Calibrate team classifier using player detections.
+        Raises: CalibrationError: If no player crops found or calibration fails.
+        """
+        logger.info("Starting calibration...")
+
+        crops = self.models.get_calibration_crops(video_path, class_id=ClassId.PLAYER)
+
+        if not crops:
+            raise CalibrationError("No player detections found for calibration.")
+
+        logger.info(f"Found {len(crops)} player crops for calibration.")
+
+        try:
+            embeddings = self.models.get_embeddings(crops)
+            logger.debug(f"Generating embeddings shape: {embeddings.shape}")
+
+            self.classifier.fit(embeddings)
+            self._is_calibrated = True
+
+            logger.info("Calibration successful.")
+
+        except Exception as e:
+            raise CalibrationError(f"Failed to calibrate classifier: {e}")
 
     def run(self, video_path, save_video_path: str | Path | None = None) -> Frames:
-        crops = self.models.get_calibration_crops(video_path, class_id=PLAYER_ID)
-        if len(crops) > 0:
-            embeddings = self.models.get_embeddings(crops)
-            self.classifier.fit(embeddings)
-        else:
-            logger.warning("WARNING: No player crops found for calibration.")
+        """
+        Run detection and tracking on video.
 
+        Args:
+            video_path: Path to input video.
+            save_video_path: Optional path to save annotated video.
+        Returns:
+            Frames: Detection results for all frames.
+
+        Raises:
+            VideoProcessingError: If video cannot be processed.
+            CalibrationError: If team calibration fails.
+        """
+        video_path = Path(video_path)
+
+        logger.info(f"Processing video: {video_path}")
+
+        # Validate video
+        frame_count, fps, resolution = self._validate_video(video_path)
+
+        # Calibrate classifier
+        try:
+            self._calibrate(video_path)
+        except CalibrationError as e:
+            logger.error(f"Calibration failed: {e}")
+            raise
+
+        # Start tracker
         tracker = sv.ByteTrack()
         frames = []
 
@@ -171,16 +138,20 @@ class Detector:
             logger.debug(f"H: {H}")
 
             # --- C. SEPARATE BALL & OTHERS ---
-            ball_detections = all_dets[all_dets.class_id == BALL_ID]
-            other_detections = all_dets[all_dets.class_id != BALL_ID]
+            ball_detections = all_dets[all_dets.class_id == ClassId.BALL]
+            other_detections = all_dets[all_dets.class_id != ClassId.BALL]
             other_detections = other_detections.with_nms(threshold=0.5)
 
             # --- D. TRACKING ---
             tracked_objects = tracker.update_with_detections(other_detections)
 
             # Split tracked objects
-            tracked_players = tracked_objects[tracked_objects.class_id == PLAYER_ID]
-            tracked_gks = tracked_objects[tracked_objects.class_id == GOALKEEPER_ID]
+            tracked_players = tracked_objects[
+                tracked_objects.class_id == ClassId.PLAYER
+            ]
+            tracked_gks = tracked_objects[
+                tracked_objects.class_id == ClassId.GOALKEEPER
+            ]
 
             # Pad ball_detections with tracker_ids to avoid error on merge
             ball_detections.tracker_id = np.array(
@@ -308,7 +279,7 @@ class Detector:
                                 else 0.0
                             )
 
-                            if class_id == BALL_ID:
+                            if class_id == ClassId.BALL:
                                 labels.append(f"Ball {conf:.2f}")
                                 color_indices.append(2)
                             else:
