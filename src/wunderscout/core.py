@@ -65,7 +65,9 @@ class Detector:
         """
         logger.info("Starting calibration...")
 
-        crops = self.models.get_calibration_crops(video_path, class_id=ClassId.PLAYER)
+        crops = self.models.get_calibration_crops(
+            video_path, class_id=ClassId.PLAYER.value
+        )
 
         if not crops:
             raise CalibrationError("No player detections found for calibration.")
