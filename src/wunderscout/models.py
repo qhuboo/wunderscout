@@ -25,6 +25,21 @@ class Models:
         self.siglip_processor = AutoProcessor.from_pretrained(siglip_path)
 
     def get_calibration_crops(self, video_path, class_id, stride=30):
+        """
+        Extract crops of detected objects for calibration.
+
+        Args:
+            video_path: Path to video file.
+            class_id: Object class to detect.
+            stride: Stride for detection
+
+        Returns:
+            List of PIL Image crops.
+
+        Note:
+            Returns empty list if no detections found.
+        """
+        logger.debug(f"Extracting calibration crops for class_id: {class_id}.")
         frame_generator = sv.get_video_frames_generator(
             source_path=video_path, stride=stride
         )
@@ -34,7 +49,12 @@ class Models:
             detections = self.detect_players(frame)
             players = detections[detections.class_id == class_id]
             frame_crops = [sv.crop_image(frame, xyxy) for xyxy in players.xyxy]
-            crops += [sv.cv2_to_pillow(c) for c in frame_crops]
+
+            # Filter invalid crops
+            valid_crops = [c for c in frame_crops if c is not None and c.size > 0]
+            crops += [sv.cv2_to_pillow(c) for c in valid_crops]
+
+        logger.debug(f"Extracted {len(crops)} calibration crops.")
 
         return crops
 
