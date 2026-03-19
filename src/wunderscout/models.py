@@ -45,17 +45,34 @@ class Models:
         )
 
         crops = []
+        frame_count = 0
+        total_detections = 0
         for frame in frame_generator:
+            frame_count += 1
+            logger.debug(f"Processing frame {frame_count}, shape: {frame.shape}.")
+
             detections = self.detect_players(frame)
+            total_detections += len(detections)
+
+            logger.debug(
+                f"Frame {frame_count}: {len(detections)} total detections, "
+                f"class_ids: {detections.class_id.tolist() if len(detections) > 0 else []}"
+            )
             players = detections[detections.class_id == class_id]
+            logger.debug(
+                f"Frame {frame_count}: {len(players)} matching class_id={class_id}"
+            )
             frame_crops = [sv.crop_image(frame, xyxy) for xyxy in players.xyxy]
 
             # Filter invalid crops
             valid_crops = [c for c in frame_crops if c is not None and c.size > 0]
             crops += [sv.cv2_to_pillow(c) for c in valid_crops]
 
-        logger.debug(f"Extracted {len(crops)} calibration crops.")
-
+        logger.info(
+            f"Calibration complete: processed {frame_count} frames, "
+            f"{total_detections} total detections, "
+            f"{len(crops)} crops extracted for class_id={class_id}"
+        )
         return crops
 
     def get_embeddings(self, pil_crops, batch_size=32):
@@ -73,7 +90,7 @@ class Models:
 
         return np.concatenate(data_list) if data_list else np.array([])
 
-    def detect_players(self, frame, conf=0.0):
+    def detect_players(self, frame, conf=0.0) -> sv.Detections:
         result = self.player_model.predict(
             frame, conf=conf, verbose=False, device=self.device
         )[0]
