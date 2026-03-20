@@ -29,12 +29,11 @@ def set_stream_logger(name="wunderscout", level=logging.DEBUG, format_string=Non
     For debugging purposes a good choice is to set the stream logger to ``''``
     which is equivalent to saying "log everything".
 
-    :type name: string
-    :param name: Log name
-    :type level: int
-    :param level: Logging level, e.g. ``logging.INFO``
-    :type format_string: str
-    :param format_string: Log message format
+    Args:
+        name: Log name.
+        level: Logging level, e.g. ``logging.INFO``.
+        format_string: Log message format.
+
     """
     if format_string is None:
         format_string = "[%(asctime)s] [%(levelname)s] [%(module)s] [%(funcName)s] [%(lineno)d] %(message)s"

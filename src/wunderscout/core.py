@@ -4,7 +4,6 @@ import supervision as sv
 import numpy as np
 import cv2
 
-from wunderscout.exceptions import CalibrationError, VideoProcessingError
 from wunderscout.types import ClassId, Frames
 
 from .models import Models
@@ -16,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 class Detector:
     def __init__(self, models: Models):
-        self.models = models
-        self.mapper = PitchMapper()
-        self.classifier = TeamClassifier()
+        self._models = models
+        self._mapper = PitchMapper()
+        self._classifier = TeamClassifier()
         self._is_calibrated = False
 
     def _validate_video(
@@ -26,19 +25,28 @@ class Detector:
     ) -> tuple[int, float, tuple[int, int]]:
         """
         Validate video can be opened and read.
-        Returns: tuple: (frame_count, fps, (width, height))
-        Raises: VideoProcessingError: If video cannot be opened.
+
+        Args:
+            video_path: Path to source video.
+
+        Returns:
+            tuple: (frame_count, fps, (width, height))
+
+        Raises:
+            FileNotFoundError: If file is not found from video_path.
+            ValueError: If video file cannot be opened.
+            OSError: If video file frame reading fails.
         """
         logger.info("Validating video...")
 
         video_path = Path(video_path)
         if not video_path.exists():
-            raise VideoProcessingError(f"Video file not found: {video_path}")
+            raise FileNotFoundError(f"Video file not found: {video_path}")
 
         cap = cv2.VideoCapture(str(video_path))
 
         if not cap.isOpened():
-            raise VideoProcessingError(f"Cannot open video file: {video_path}")
+            raise ValueError(f"Invalid or unsupported video format: {video_path}")
 
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -50,9 +58,11 @@ class Detector:
         cap.release()
 
         if not ret:
-            raise VideoProcessingError(f"Cannot open video file: {video_path}")
+            raise OSError(
+                f"Cannot read video data (corrupted or incomplete): {video_path}"
+            )
 
-        logger.debug(
+        logger.info(
             f"Video validated: {frame_count} frames, {fps:.1f} fps, {width}x{height}"
         )
 
@@ -61,30 +71,31 @@ class Detector:
     def _calibrate(self, video_path: str | Path) -> None:
         """
         Calibrate team classifier using player detections.
-        Raises: CalibrationError: If no player crops found or calibration fails.
+
+        Args:
+            video_path: Path to source video.
+
+        Raises:
+            RuntimeError: If no player crops found or calibration fails.
         """
         logger.info("Starting calibration...")
 
-        crops = self.models.get_calibration_crops(
-            video_path, class_id=ClassId.PLAYER.value
+        crops = self._models._get_calibration_crops(
+            video_path, class_id=ClassId.PLAYER.value, stride=10
         )
 
         if not crops:
-            raise CalibrationError("No player detections found for calibration.")
+            raise RuntimeError("No player detections found for calibration.")
 
         logger.info(f"Found {len(crops)} player crops for calibration.")
 
-        try:
-            embeddings = self.models.get_embeddings(crops)
-            logger.debug(f"Generating embeddings shape: {embeddings.shape}")
+        embeddings = self._models._get_embeddings(crops)
+        logger.debug(f"Generating embeddings shape: {embeddings.shape}")
 
-            self.classifier.fit(embeddings)
-            self._is_calibrated = True
+        self._classifier.fit(embeddings)
+        self._is_calibrated = True
 
-            logger.info("Calibration successful.")
-
-        except Exception as e:
-            raise CalibrationError(f"Failed to calibrate classifier: {e}")
+        logger.info("Calibration successful.")
 
     def run(self, video_path, save_video_path: str | Path | None = None) -> Frames:
         """
@@ -104,44 +115,41 @@ class Detector:
 
         logger.info(f"Processing video: {video_path}")
 
-        # Validate video
-        frame_count, fps, resolution = self._validate_video(video_path)
+        frame_count, _, _ = self._validate_video(video_path)
 
         # Calibrate classifier
-        try:
-            self._calibrate(video_path)
-        except CalibrationError as e:
-            logger.error(f"Calibration failed: {e}")
-            raise
+        self._calibrate(video_path)
 
         # Start tracker
         tracker = sv.ByteTrack()
         frames = []
 
         # 3. Main Processing Loop
-        logger.debug(f"Starting processing: {video_path}")
-        frame_generator = sv.get_video_frames_generator(video_path)
+        logger.info(f"Starting processing: {video_path}")
+        frame_generator = sv.get_video_frames_generator(str(video_path))
         for frame_idx, frame in enumerate(frame_generator):
-            logger.debug(f"Processing frame {frame_idx}")
+            logger.info(f"Processing frame {frame_idx + 1}/{frame_count}")
             # --- A. DETECTION ---
-            all_dets = self.models.detect_players(frame)
-            f_res = self.models.detect_field(frame)
+            all_dets = self._models._detect_players(frame)
+            f_res = self._models._detect_field(frame)
+
+            logger.debug("Frame %d: Initial detections: %d", frame_idx, len(all_dets))
 
             # --- B. FIELD HOMOGRAPHY ---
             H = None
             if f_res.keypoints is not None and len(f_res.keypoints.xy) > 0:
-                H = self.mapper.get_matrix(
+                H = self._mapper.get_matrix(
                     f_res.keypoints.xy[0].cpu().numpy(),
                     f_res.keypoints.conf[0].cpu().numpy(),
                 )
             else:
-                H = self.mapper.last_h
+                H = self._mapper.last_h
 
             logger.debug(f"H: {H}")
 
             # --- C. SEPARATE BALL & OTHERS ---
-            ball_detections = all_dets[all_dets.class_id == ClassId.BALL]
-            other_detections = all_dets[all_dets.class_id != ClassId.BALL]
+            ball_detections = all_dets[all_dets.class_id == ClassId.BALL.value]
+            other_detections = all_dets[all_dets.class_id != ClassId.BALL.value]
             other_detections = other_detections.with_nms(threshold=0.5)
 
             # --- D. TRACKING ---
@@ -149,10 +157,10 @@ class Detector:
 
             # Split tracked objects
             tracked_players = tracked_objects[
-                tracked_objects.class_id == ClassId.PLAYER
+                tracked_objects.class_id == ClassId.PLAYER.value
             ]
             tracked_gks = tracked_objects[
-                tracked_objects.class_id == ClassId.GOALKEEPER
+                tracked_objects.class_id == ClassId.GOALKEEPER.value
             ]
 
             # Pad ball_detections with tracker_ids to avoid error on merge
@@ -166,9 +174,9 @@ class Detector:
             if len(tracked_players) > 0:
                 p_crops = [sv.crop_image(frame, xyxy) for xyxy in tracked_players.xyxy]
                 p_pil = [sv.cv2_to_pillow(c) for c in p_crops]
-                p_embeddings = self.models.get_embeddings(p_pil)
+                p_embeddings = self._models._get_embeddings(p_pil)
 
-                final_team_ids = self.classifier.get_consensus_teams(
+                final_team_ids = self._classifier.get_consensus_teams(
                     tracked_players.tracker_id, p_embeddings
                 )
 
@@ -180,7 +188,7 @@ class Detector:
             # 2. Goalkeepers
             if len(tracked_gks) > 0 and len(tracked_players) > 0:
                 tracked_gks.data["team_id"] = (
-                    self.classifier.resolve_goalkeepers_team_id(
+                    self._classifier.resolve_goalkeepers_team_id(
                         tracked_players, tracked_gks
                     )
                 )
@@ -200,7 +208,7 @@ class Detector:
 
             if len(data_targets) > 0:
                 if H is not None:
-                    data_targets.data["pitch_coordinates"] = self.mapper.transform(
+                    data_targets.data["pitch_coordinates"] = self._mapper.transform(
                         data_targets.get_anchors_coordinates(sv.Position.BOTTOM_CENTER),
                         H,
                     )
@@ -214,7 +222,7 @@ class Detector:
 
             if len(ball_detections) > 0:
                 if H is not None:
-                    ball_detections.data["pitch_coordinates"] = self.mapper.transform(
+                    ball_detections.data["pitch_coordinates"] = self._mapper.transform(
                         ball_detections.get_anchors_coordinates(sv.Position.CENTER), H
                     )
                 else:
@@ -236,8 +244,6 @@ class Detector:
                 orig_path = Path(video_path)
                 new_filename = f"{orig_path.stem}_annotated{orig_path.suffix}"
                 final_video_file = out_dir / new_filename
-
-                logger.info(f"Generating annotated video at {final_video_file}...")
 
                 video_info = sv.VideoInfo.from_video_path(str(video_path))
                 render_generator = sv.get_video_frames_generator(str(video_path))
@@ -281,7 +287,7 @@ class Detector:
                                 else 0.0
                             )
 
-                            if class_id == ClassId.BALL:
+                            if class_id == ClassId.BALL.value:
                                 labels.append(f"Ball {conf:.2f}")
                                 color_indices.append(2)
                             else:
@@ -308,4 +314,5 @@ class Detector:
                         )
 
                         sink.write_frame(frame=annotated)
+
         return Frames(frames)

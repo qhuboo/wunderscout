@@ -12,19 +12,20 @@ logger = logging.getLogger(__name__)
 
 class Models:
     def __init__(self, player_weights, field_weights, siglip_path=None):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.player_model = YOLO(player_weights)
-        self.player_model.to(self.device)
-        self.field_model = YOLO(field_weights)
-        self.field_model.to(self.device)
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._player_model = YOLO(player_weights)
+        self._player_model.to(self._device)
+        self._field_model = YOLO(field_weights)
+        self._field_model.to(self._device)
 
         siglip_path = siglip_path or "google/siglip-base-patch16-224"
-        self.siglip_model = SiglipVisionModel.from_pretrained(siglip_path).to(
-            self.device
+        self._siglip_model = SiglipVisionModel.from_pretrained(siglip_path).to(
+            self._device
         )
-        self.siglip_processor = AutoProcessor.from_pretrained(siglip_path)
+        self._siglip_processor = AutoProcessor.from_pretrained(siglip_path)
 
-    def get_calibration_crops(self, video_path, class_id, stride=30):
+    # TODO: Add detailed docstring, logging, and better error handling
+    def _get_calibration_crops(self, video_path, class_id, stride=30):
         """
         Extract crops of detected objects for calibration.
 
@@ -51,7 +52,7 @@ class Models:
             frame_count += 1
             logger.debug(f"Processing frame {frame_count}, shape: {frame.shape}.")
 
-            detections = self.detect_players(frame)
+            detections = self._detect_players(frame)
             total_detections += len(detections)
 
             logger.debug(
@@ -75,53 +76,32 @@ class Models:
         )
         return crops
 
-    def get_embeddings(self, pil_crops, batch_size=32):
+    # TODO: Add detailed docstring, logging, and better error handling
+    def _get_embeddings(self, pil_crops, batch_size=32):
         batches = chunked(pil_crops, batch_size)
         data_list = []
 
         with torch.no_grad():
             for batch in batches:
-                inputs = self.siglip_processor(images=batch, return_tensors="pt").to(
-                    self.device
+                inputs = self._siglip_processor(images=batch, return_tensors="pt").to(
+                    self._device
                 )
-                outputs = self.siglip_model(**inputs)
+                outputs = self._siglip_model(**inputs)
                 embeddings = torch.mean(outputs.last_hidden_state, dim=1).cpu().numpy()
                 data_list.append(embeddings)
 
         return np.concatenate(data_list) if data_list else np.array([])
 
-    def detect_players(self, frame, conf=0.0) -> sv.Detections:
-        result = self.player_model.predict(
-            frame, conf=conf, verbose=False, device=self.device
+    # TODO: Add detailed docstring, logging, and better error handling
+    def _detect_players(self, frame, conf=0.0) -> sv.Detections:
+        result = self._player_model.predict(
+            frame, conf=conf, verbose=False, device=self._device
         )[0]
         return sv.Detections.from_ultralytics(result)
 
-    def detect_field(self, frame, conf=0.0):
-        result = self.field_model.predict(
-            frame, conf=conf, verbose=False, device=self.device
+    # TODO: Add detailed docstring, logging, and better error handling
+    def _detect_field(self, frame, conf=0.0) -> sv.Detections:
+        result = self._field_model.predict(
+            frame, conf=conf, verbose=False, device=self._device
         )[0]
         return result
-
-    def draw_annotations(self, frame, all_detections, ball_detections):
-        annotated_frame = frame.copy()
-
-        # 1. Draw Ball
-        annotated_frame = self.triangle_annotator.annotate(
-            scene=annotated_frame, detections=ball_detections
-        )
-
-        # 2. Draw People (Players, GKs, Refs)
-        if len(all_detections) > 0:
-            # Ensure class_id is int for color mapping
-            all_detections.class_id = all_detections.class_id.astype(int)
-
-            labels = [f"#{tracker_id}" for tracker_id in all_detections.tracker_id]
-
-            annotated_frame = self.ellipse_annotator.annotate(
-                scene=annotated_frame, detections=all_detections
-            )
-            annotated_frame = self.label_annotator.annotate(
-                scene=annotated_frame, detections=all_detections, labels=labels
-            )
-
-        return annotated_frame

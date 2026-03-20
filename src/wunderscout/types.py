@@ -5,6 +5,10 @@ import csv
 import numpy as np
 import supervision as sv
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class ClassId(Enum):
     BALL = 0
@@ -22,24 +26,27 @@ class SaveResult:
 
 @dataclass
 class Frames:
-    detections: list[sv.Detections]
+    _detections: list[sv.Detections]
     _player_team_map: dict[int, int] = field(init=False)
 
     def __post_init__(self):
         self._player_team_map = self._build_player_team_map()
 
+    def __len__(self):
+        return len(self._detections)
+
+    def __getitem__(self, key):
+        return self._detections[key]
+
+    def __iter__(self):
+        return iter(self._detections)
+
     def _build_player_team_map(self):
-        merged = sv.Detections.merge(self.detections)
-        if merged.tracker_id is None:
-            return {}
-
-        all_players = merged[merged.class_id == ClassID.PLAYER]
-
+        merged = sv.Detections.merge(self._detections)
+        players = merged[merged.class_id == ClassId.PLAYER.value]
         player_team_map = {
             int(tracker_id): int(team_id)
-            for tracker_id, team_id in zip(
-                all_players.tracker_id, all_players.data["team_id"]
-            )
+            for tracker_id, team_id in zip(players.tracker_id, players.data["team_id"])
         }
 
         return player_team_map
@@ -87,7 +94,7 @@ class Frames:
                     + ["Ball", ""]
                 )
 
-                for f_idx, detection in enumerate(self.detections):
+                for f_idx, detection in enumerate(self._detections):
                     # period, frame, time
                     row = [1, f_idx, ""]
 
@@ -105,7 +112,7 @@ class Frames:
                             row.extend(["NaN", "NaN"])
 
                     # Get ball position
-                    ball_mask = detection.class_id == ClassID.BALL
+                    ball_mask = detection.class_id == ClassId.BALL
                     if ball_mask.any():
                         idx = np.where(ball_mask)[0][0]
                         coords = detection.data["pitch_coordinates"][idx]

@@ -8,7 +8,7 @@ from typing import Literal, Any
 import supervision as sv
 
 from wunderscout.core import Frames
-from wunderscout.types import SaveResult
+from wunderscout.types import ClassId, SaveResult
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class HeatmapGenerator:
         self.pitch_width = pitch_width
         self.histogram_bins = histogram_bins
         self.kde_grid_size = kde_grid_size
-        self.min_samples_for_kde = 10  # min_samples_for_kde: Minimum number of samples required for KDE. Weird behavior due to bad data, will remove as the model improves.
+        self._min_samples_for_kde = 10  # min_samples_for_kde: Minimum number of samples required for KDE. Weird behavior due to bad data, will remove as the model improves.
 
     def _scale_to_meters(self, positions: np.ndarray) -> np.ndarray:
         """Convert normalized [0, 1] coordinates to meters."""
@@ -165,9 +165,10 @@ class HeatmapGenerator:
             team_id: Team ID (0 or 1)
             heatmap_type: "histogram", "kde", or "both"
         """
-        all_frames = sv.Detections.merge(frames.detections)
+        all_frames = sv.Detections.merge(list(frames))
         player_ids = all_frames[
-            (all_frames.class_id == 2) & (all_frames.data["team_id"] == team_id)
+            (all_frames.class_id == ClassId.PLAYER.value)
+            & (all_frames.data["team_id"] == team_id)
         ].tracker_id
 
         # Collect all positions from all players
@@ -194,7 +195,7 @@ class HeatmapGenerator:
 
         # KDE (with quality checks)
         if heatmap_type in ["kde", "both"]:
-            if len(all_positions) < self.min_samples_for_kde:
+            if len(all_positions) < self._min_samples_for_kde:
                 logger.debug(
                     f"Info: Team {team_id} has only {len(all_positions)} samples. "
                     f"Skipping KDE."
@@ -232,7 +233,7 @@ class HeatmapGenerator:
         Returns:
             Dictionary with heatmap data in format ready for JSON export
         """
-        merged_frames = sv.Detections.merge(frames.detections)
+        merged_frames = sv.Detections.merge(list(frames))
         positions = merged_frames[merged_frames.tracker_id == player_id].data[
             "pitch_coordinates"
         ]
@@ -255,10 +256,10 @@ class HeatmapGenerator:
 
         # Only attempt KDE if we have enough quality data
         if heatmap_type in ["kde", "both"]:
-            if len(positions) < self.min_samples_for_kde:
+            if len(positions) < self._min_samples_for_kde:
                 logger.warning(
                     f"Info: Player {player_id} has only {len(positions)} samples "
-                    f"(minimum {self.min_samples_for_kde} required for KDE). "
+                    f"(minimum {self._min_samples_for_kde} required for KDE). "
                     f"Skipping KDE, histogram only."
                 )
                 # Don't include kde key at all
