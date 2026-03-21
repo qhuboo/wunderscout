@@ -21,7 +21,6 @@ context.md
 notes.md
 
 # Local
-research/
 context/
 
 # OS Files
@@ -37,4 +36,7 @@ context/
 pyrightconfig.json
 
 # pytest
-
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
