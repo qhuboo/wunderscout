@@ -1,12 +1,63 @@
-import logging
+from dataclasses import dataclass
 import json
+import logging
 from scipy.stats import gaussian_kde
 import numpy as np
 from pathlib import Path
 from typing import Literal, Any
-from .data import TrackingResult
+import supervision as sv
+
+from wunderscout.core import Frames
+from wunderscout.types import ClassId, SaveResult
 
 logger = logging.getLogger(__name__)
+
+HeatmapKey = Literal["histogram", "kde"]
+
+
+@dataclass
+class Heatmap:
+    data: dict[HeatmapKey, Any]
+    identifier: int
+    prefix: Literal["player", "team"]
+
+    def save(
+        self,
+        output_path: str | Path,
+        heatmap_type: Literal["histogram", "kde", "both"] = "both",
+    ) -> SaveResult:
+        """Save heatmap data to JSON file."""
+        path_obj = Path(output_path)
+        path_obj.mkdir(parents=True, exist_ok=True)
+        types_to_save: list[HeatmapKey] = (
+            list(self.data.keys()) if heatmap_type == "both" else [heatmap_type]
+        )
+
+        save_result = SaveResult()
+
+        for t in types_to_save:
+            path = path_obj / f"{self.prefix}_{self.identifier}_{t}.json"
+            try:
+                with open(path, "w") as f:
+                    json.dump(self.data[t], f)
+                save_result.successful_paths.append(path)
+            except KeyError as e:
+                error_msg = f"Key {e} not found in heatmap data"
+                logger.warning(f"Error: {error_msg}")
+                save_result.errors.append(str(error_msg))
+                save_result.failed_paths.append(path)
+            except TypeError as e:
+                error_msg = f"Data serialization error for {t}: {e}"
+                logger.warning(f"Error: {error_msg}")
+                save_result.errors.append(str(error_msg))
+                save_result.failed_paths.append(path)
+            except Exception as e:
+                error_msg = f"Unexpected error saving {t}: {e}"
+                logger.warning(f"Error: {error_msg}")
+                save_result.errors.append(str(error_msg))
+                save_result.failed_paths.append(path)
+
+        return save_result
 
 
 class HeatmapGenerator:
@@ -16,7 +67,6 @@ class HeatmapGenerator:
         pitch_width: float = 68.0,
         histogram_bins: tuple[int, int] = (50, 34),
         kde_grid_size: tuple[int, int] = (100, 68),
-        min_samples_for_kde: int = 10,  # Minimum samples needed for KDE
     ):
         """
         Initialize heatmap generator with pitch dimensions and resolution.
@@ -26,13 +76,12 @@ class HeatmapGenerator:
             pitch_width: Width of pitch in meters (default 68m)
             histogram_bins: (x_bins, y_bins) for histogram heatmap
             kde_grid_size: (x_points, y_points) for KDE grid resolution
-            min_samples_for_kde: Minimum number of samples required for KDE
         """
         self.pitch_length = pitch_length
         self.pitch_width = pitch_width
         self.histogram_bins = histogram_bins
         self.kde_grid_size = kde_grid_size
-        self.min_samples_for_kde = min_samples_for_kde
+        self._min_samples_for_kde = 10  # min_samples_for_kde: Minimum number of samples required for KDE. Weird behavior due to bad data, will remove as the model improves.
 
     def _scale_to_meters(self, positions: np.ndarray) -> np.ndarray:
         """Convert normalized [0, 1] coordinates to meters."""
@@ -104,124 +153,118 @@ class HeatmapGenerator:
 
     def team(
         self,
-        result: TrackingResult,
-        team: int,
-        method: Literal["histogram", "kde", "both"] = "both",
-    ) -> dict[str, Any]:
+        frames: Frames,
+        team_id: int,
+        heatmap_type: Literal["histogram", "kde", "both"] = "both",
+    ) -> Heatmap:
         """
         Generate aggregated heatmap for entire team.
 
         Args:
-            result: TrackingResult from pipeline
-            team: Team ID (0 or 1)
-            method: "histogram", "kde", or "both"
+            frames: Frames object
+            team_id: Team ID (0 or 1)
+            heatmap_type: "histogram", "kde", or "both"
         """
-        player_ids = result.get_team_players(team)
-
-        if len(player_ids) == 0:
-            raise ValueError(f"No players found for team {team}")
+        all_frames = sv.Detections.merge(list(frames))
+        player_ids = all_frames[
+            (all_frames.class_id == ClassId.PLAYER.value)
+            & (all_frames.data["team_id"] == team_id)
+        ].tracker_id
 
         # Collect all positions from all players
-        all_positions = []
-        for pid in player_ids:
-            trajectory = result.get_player_trajectory(pid)
-            all_positions.extend(trajectory)
-
-        if len(all_positions) == 0:
-            raise ValueError(f"No position data found for team {team}")
+        all_positions = all_frames[np.isin(all_frames.tracker_id, player_ids)].data[
+            "pitch_coordinates"
+        ]
 
         positions = np.array(all_positions)
         positions_meters = self._scale_to_meters(positions)
         x, y = positions_meters[:, 0], positions_meters[:, 1]
 
-        output: dict[str, Any] = {
-            "team_id": team,
-            "player_count": len(player_ids),
-            "sample_count": len(all_positions),
-        }
+        output: dict[HeatmapKey, Any] = {}
 
         # Histogram (always attempt)
-        if method in ["histogram", "both"]:
+        if heatmap_type in ["histogram", "both"]:
             try:
                 histogram_result = self._compute_histogram(x, y)
                 output["histogram"] = histogram_result
             except Exception as e:
-                print(f"Warning: Team histogram failed for team {team}: {e}")
+                logger.warning(
+                    f"Warning: Team histogram failed for team {team_id}: {e}"
+                )
                 # Don't include histogram key at all if it fails
 
         # KDE (with quality checks)
-        if method in ["kde", "both"]:
-            if len(all_positions) < self.min_samples_for_kde:
-                print(
-                    f"Info: Team {team} has only {len(all_positions)} samples. "
+        if heatmap_type in ["kde", "both"]:
+            if len(all_positions) < self._min_samples_for_kde:
+                logger.debug(
+                    f"Info: Team {team_id} has only {len(all_positions)} samples. "
                     f"Skipping KDE."
                 )
                 # Don't include kde key at all
             elif not self._has_sufficient_variation(x, y):
-                print(f"Info: Team {team} has insufficient variation. Skipping KDE.")
+                logger.debug(
+                    f"Info: Team {team_id} has insufficient variation. Skipping KDE."
+                )
                 # Don't include kde key at all
             else:
                 try:
                     kde_result = self._compute_kde(x, y)
                     output["kde"] = kde_result
                 except Exception as e:
-                    print(f"Warning: KDE failed for team {team}: {e}")
+                    logger.warning(f"Warning: KDE failed for team {team_id}: {e}")
                     # Don't include kde key at all if it fails
 
-        return output
+        return Heatmap(output, team_id, "team")
 
     def player(
         self,
-        result: TrackingResult,
+        frames: Frames,
         player_id: int,
-        method: Literal["histogram", "kde", "both"] = "both",
-    ) -> dict[str, Any]:
+        heatmap_type: Literal["histogram", "kde", "both"] = "both",
+    ) -> Heatmap:
         """
         Generate heatmap for a single player.
 
         Args:
-            result: TrackingResult from pipeline
+            frames: Frames object
             player_id: Player tracker ID
-            method: "histogram", "kde", or "both"
+            heatmap_type: "histogram", "kde", or "both"
 
         Returns:
             Dictionary with heatmap data in format ready for JSON export
         """
-        trajectory = result.get_player_trajectory(player_id)
+        merged_frames = sv.Detections.merge(list(frames))
+        positions = merged_frames[merged_frames.tracker_id == player_id].data[
+            "pitch_coordinates"
+        ]
+        # Separate x,y coordinates and flattens positions
+        coordinates = np.array(positions)
+        coordinates_meters = self._scale_to_meters(coordinates)
 
-        if len(trajectory) == 0:
-            raise ValueError(f"No trajectory data found for player {player_id}")
+        x, y = coordinates_meters[:, 0], coordinates_meters[:, 1]
 
-        positions = np.array(trajectory)
-        positions_meters = self._scale_to_meters(positions)
-
-        x, y = positions_meters[:, 0], positions_meters[:, 1]
-
-        output: dict[str, Any] = {
-            "player_id": player_id,
-            "sample_count": len(trajectory),
-        }
+        output: dict[HeatmapKey, Any] = {}
 
         # Always try histogram (works with any amount of data)
-        if method in ["histogram", "both"]:
+        if heatmap_type in ["histogram", "both"]:
             try:
                 histogram_result = self._compute_histogram(x, y)
                 output["histogram"] = histogram_result
             except Exception as e:
-                print(f"Warning: Histogram failed for player {player_id}: {e}")
+                logger.warning(f"Warning: Histogram failed for player {player_id}: {e}")
                 # Don't include histogram key at all if it fails
 
         # Only attempt KDE if we have enough quality data
-        if method in ["kde", "both"]:
-            if len(trajectory) < self.min_samples_for_kde:
-                print(
-                    f"Info: Player {player_id} has only {len(trajectory)} samples "
-                    f"(minimum {self.min_samples_for_kde} required for KDE). "
+        if heatmap_type in ["kde", "both"]:
+            if len(positions) < self._min_samples_for_kde:
+                logger.warning(
+                    f"Info: Player {player_id} has only {len(positions)} samples "
+                    f"(minimum {self._min_samples_for_kde} required for KDE). "
                     f"Skipping KDE, histogram only."
                 )
                 # Don't include kde key at all
             elif not self._has_sufficient_variation(x, y):
-                print(
+                logger.warning(
                     f"Info: Player {player_id} has insufficient spatial variation "
                     f"for KDE. Skipping KDE, histogram only."
                 )
@@ -231,41 +274,7 @@ class HeatmapGenerator:
                     kde_result = self._compute_kde(x, y)
                     output["kde"] = kde_result
                 except Exception as e:
-                    print(f"Warning: KDE failed for player {player_id}: {e}")
+                    logger.warning(f"Warning: KDE failed for player {player_id}: {e}")
                     # Don't include kde key at all if it fails
 
-        return output
-
-    def all_players(
-        self,
-        result: TrackingResult,
-        method: Literal["histogram", "kde", "both"] = "both",
-    ) -> dict[int, dict[str, Any]]:
-        """
-        Generate heatmaps for all players.
-
-        Returns:
-            Dictionary mapping player_id -> heatmap data
-        """
-        all_heatmaps = {}
-
-        for player_id in result.get_all_player_ids():
-            try:
-                all_heatmaps[player_id] = self.player(result, player_id, method)
-            except ValueError as e:
-                print(f"Warning: Skipping player {player_id}: {e}")
-
-        return all_heatmaps
-
-    def save(
-        self,
-        heatmap_data: dict[str, Any],
-        output_path: str,
-        pretty: bool = False,
-    ):
-        """Save heatmap data to JSON file."""
-        path_obj = Path(output_path)
-        path_obj.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, "w") as f:
-            json.dump(heatmap_data, f, indent=2 if pretty else None)
+        return Heatmap(output, player_id, "player")

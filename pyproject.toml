@@ -52,6 +52,9 @@ python-dotenv = ["dotenv"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "integration: marks tests as integration tests."
+]
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
