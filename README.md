@@ -1,15 +1,20 @@
-# wunderscout
+# WunderScout
 
-A Python library for extracting player and ball tracking data from soccer match footage using YOLO, Siglip embeddings, and homography.
+> ⚠️ **EXPERIMENTAL PROJECT** ⚠️
+>
+> This is an experimental computer vision project for soccer/football video analysis. It is **NOT** production-ready and should be used for research, experimentation, and educational purposes only. The API may change without notice, and results may not be accurate or reliable for professional or commercial applications.
+
+WunderScout is a Python library for automated soccer/football video analysis using computer vision and machine learning. It provides tools for player detection, tracking, team classification, and positional heatmap generation from match footage.
 
 ## Features
 
-- **Detection & Tracking**: Uses YOLO for player/ball/pitch-keypoint detection and ByteTrack for temporal consistency.
-- **Automated Team Clustering**: Groups players into teams using Siglip vision transformer embeddings and K-Means clustering via UMAP dimensionality reduction.
-- **Pitch Mapping**: Transforms 2D image coordinates to a normalized 0-1 coordinate system using pitch keypoint homography.
-- **Goalkeeper Attribution**: Assigns goalkeepers to teams based on proximity to team centroids.
-- **Data Export**: Generates Team1 and Team2 CSV files containing frame-by-frame XY coordinates.
-- **Heatmap Generation**: Creates histogram and KDE-based spatial density maps for individual players and teams.
+- **Player & Ball Detection**: Automatic detection of players, goalkeepers, and ball in video frames
+- **Multi-Object Tracking**: Track players across frames with unique IDs
+- **Team Classification**: Automatic team assignment using visual embeddings
+- **Pitch Mapping**: Transform image coordinates to real-world pitch coordinates
+- **Heatmap Generation**: Create spatial heatmaps for individual players or entire teams
+- **CSV Export**: Export tracking data in standardized CSV format
+- **Video Annotation**: Generate annotated videos with bounding boxes and labels
 
 ## Installation
 
@@ -17,219 +22,387 @@ A Python library for extracting player and ball tracking data from soccer match 
 pip install wunderscout
 ```
 
+### Requirements
+
+- Python 3.8+
+- CUDA-capable GPU (recommended for performance)
+- Model weights for player detection and field keypoint detection
+
 ## Quick Start
 
 ```python
-from wunderscout import Detector, DataExporter, HeatmapGenerator
+import wunderscout
 
-# Initialize with paths to trained YOLO weights
-detector = Detector(
-    player_weights="players.pt",
-    field_weights="pitch.pt"
+# Enable logging (optional)
+wunderscout.set_stream_logger('wunderscout', level=logging.INFO)
+
+# Initialize models
+models = wunderscout.Models(
+    player_weights='path/to/player_model.pt',
+    field_weights='path/to/field_model.pt'
 )
 
-# Run processing
-result = detector.run(
-    video_path="input_match.mp4",
-    output_video_path="output_match.mp4"
+# Create detector
+detector = wunderscout.Detector(models)
+
+# Process video
+frames = detector.run(
+    video_path='match.mp4',
+    output_dir='./output'  # Optional: save annotated video
 )
 
-# Export tracking data to CSV
-exporter = DataExporter()
-exporter.save_csvs(result, "output/tracking.csv")
+# Export tracking data
+frames.save_csvs('./tracking_data')
 
 # Generate heatmaps
-heatmap_gen = HeatmapGenerator()
-player_heatmap = heatmap_gen.generate_player_heatmap(result, player_id=5, method="both")
-heatmap_gen.save_heatmap(player_heatmap, "output/player_5.json")
+heatmap_gen = wunderscout.HeatmapGenerator()
+player_heatmap = heatmap_gen.player(frames, player_id=5)
+player_heatmap.save('./heatmaps', heatmap_type='both')
 ```
 
-## Core Components
+## API Reference
 
-### Detector
+### Core Classes
 
-Main pipeline coordinator that orchestrates detection, tracking, and classification.
+#### `Models`
 
-**Parameters:**
-- `player_weights` (str): Path to YOLO player detection model
-- `field_weights` (str): Path to YOLO field keypoint detection model
-
-**Methods:**
-- `run(video_path, output_video_path=None)`: Process video and return `TrackingResult`
-
-### Models
-
-Handles YOLO detection and SiGLIP embedding extraction.
-
-**Key Methods:**
-- `detect_players(frame, conf=0.3)`: Detect players, goalkeepers, referees, and ball
-- `detect_field(frame, conf=0.3)`: Detect pitch keypoints for homography
-- `get_embeddings(pil_crops, batch_size=32)`: Extract visual embeddings for team classification
-- `get_calibration_crops(video_path, stride=30)`: Sample player crops for calibration
-
-**Detection Class IDs:**
-- 0: Ball
-- 1: Goalkeeper
-- 2: Player
-- 3: Referee
-
-### TeamClassifier
-
-Clusters players into teams using UMAP + K-Means with temporal smoothing.
-
-**Methods:**
-- `fit(embeddings)`: Train clustering model on calibration embeddings
-- `get_consensus_team(tracker_id, embedding)`: Assign team ID with 50-frame rolling consensus
-- `resolve_goalkeepers_team_id(players, goalkeepers)`: Assign goalkeepers by centroid proximity
-- `get_final_assignments()`: Get final team assignments (dict: tracker_id → team_id)
-
-### PitchMapper
-
-Projects pixel coordinates to normalized pitch coordinates [0, 1] × [0, 1] using homography.
-
-**Methods:**
-- `get_matrix(keypoints_xy, keypoints_conf)`: Compute homography from detected pitch keypoints (requires ≥4 keypoints with conf > 0.5)
-- `transform(points, H=None)`: Transform points to normalized pitch coordinates
-
-### HeatmapGenerator
-
-Generates spatial density maps using histogram binning and/or Gaussian KDE.
-
-**Parameters:**
-- `pitch_length` (float): Pitch length in meters (default: 105.0)
-- `pitch_width` (float): Pitch width in meters (default: 68.0)
-- `histogram_bins` (tuple): Histogram resolution (default: (50, 34))
-- `kde_grid_size` (tuple): KDE grid resolution (default: (100, 68))
-- `min_samples_for_kde` (int): Minimum samples for KDE (default: 10)
-
-**Methods:**
-- `generate_player_heatmap(result, player_id, method="both")`: Generate heatmap for one player
-- `generate_team_heatmap(result, team, method="both")`: Generate aggregated team heatmap
-- `generate_all_players_heatmaps(result, method="both")`: Generate heatmaps for all players
-- `save_heatmap(heatmap_data, output_path, pretty=False)`: Save heatmap to JSON
-
-### DataExporter
-
-Exports tracking data to CSV format.
-
-**Methods:**
-- `save_csvs(result, output_path)`: Export tracking data (creates `{base_name}_Team1.csv` and `{base_name}_Team2.csv`)
-
-### TrackingResult
-
-Data class containing tracking results.
-
-**Attributes:**
-- `frames` (dict): Frame-by-frame tracking data `{frame_idx: {"players": {player_id: (x, y)}, "ball": (x, y) or None}}`
-- `team_assignments` (dict): Player ID → Team ID mapping
-- `total_frames` (int): Total number of processed frames
-- `fps` (float): Video frame rate
-
-**Methods:**
-- `get_team_players(team)`: Get player IDs for team 0 or 1
-- `get_all_player_ids()`: Get all tracked player IDs
-- `get_player_trajectory(player_id)`: Get position history for one player
-- `get_ball_trajectory()`: Get ball position history
-
-## Training Custom Models
+Manages the machine learning models for detection and classification.
 
 ```python
-from wunderscout import Trainer
-
-trainer = Trainer(api_key="your_roboflow_api_key")
-
-# Train player detection model
-trainer.train_players(
-    workspace="soccer-analytics",
-    project="player-detection",
-    version=1,
-    epochs=300,
-    output_dir="runs/training/player"
-)
-
-# Train field keypoint model
-trainer.train_field(
-    workspace="soccer-analytics",
-    project="field-keypoints",
-    version=1,
-    epochs=300,
-    output_dir="runs/training/field"
+Models(
+    player_weights: str,
+    field_weights: str,
+    siglip_path: str = None
 )
 ```
 
-## Output Formats
+**Parameters:**
 
-### CSV Export
+- `player_weights`: Path to YOLO weights file for player/ball detection
+- `field_weights`: Path to YOLO weights file for field keypoint detection
+- `siglip_path`: Path or identifier for SiglipVisionModel (default: "google/siglip-base-patch16-224")
 
-Two CSV files (one per team) with structure:
+---
 
-```csv
-,,,Team1,Team1,Team1,Team1,,
-,,,3,3,7,7,,
-Period,Frame,Time [s],Player3_X,Player3_Y,Player7_X,Player7_Y,Ball_X,Ball_Y
-1,0,0.00,0.234,0.567,0.789,0.345,0.500,0.500
-1,1,0.04,0.235,0.568,NaN,NaN,0.501,0.499
+#### `Detector`
+
+Main class for running detection and tracking on video footage.
+
+```python
+Detector(models: Models)
 ```
 
-**Coordinate System:**
-- Range: [0, 1] × [0, 1]
-- (0, 0) = Top-left corner of pitch
-- (1, 1) = Bottom-right corner of pitch
-- Missing data: "NaN"
+**Methods:**
 
-### Heatmap JSON
+##### `run(video_path, output_dir=None) -> Frames`
 
-```json
-{
-  "player_id": 5,
-  "sample_count": 1500,
-  "histogram": {
-    "xedges": [0.0, 2.1, 4.2, ..., 105.0],
-    "yedges": [0.0, 2.0, 4.0, ..., 68.0],
-    "values": [[count_00, count_01, ...], [count_10, count_11, ...], ...]
-  },
-  "kde": {
-    "x": [0.0, 1.05, 2.1, ..., 105.0],
-    "y": [0.0, 1.0, 2.0, ..., 68.0],
-    "values": [[density_00, density_01, ...], [density_10, density_11, ...], ...]
-  }
-}
+Process a video file and return tracking results.
+
+**Parameters:**
+
+- `video_path` (str | Path): Path to input video file
+- `output_dir` (str | Path | None): Optional directory to save annotated video
+
+**Returns:**
+
+- `Frames`: Object containing detection results for all frames
+
+**Raises:**
+
+- `FileNotFoundError`: If video file not found
+- `ValueError`: If video format is invalid or output_dir is a file
+- `OSError`: If video data cannot be read
+- `RuntimeError`: If calibration fails
+
+**Example:**
+
+```python
+detector = Detector(models)
+frames = detector.run('match.mp4', output_dir='./annotated')
 ```
 
-## Pitch Coordinate System
+---
 
-Normalized coordinate system mapping to standard football pitch (105m × 68m).
+#### `Frames`
 
-**Coordinate Range:**
-- X-axis: 0.0 (left goal line) → 1.0 (right goal line)
-- Y-axis: 0.0 (top sideline) → 1.0 (bottom sideline)
+Container for detection results across all video frames.
 
-**Key Landmarks:**
+**Methods:**
 
-| Landmark | X | Y | Description |
-|----------|---|---|-------------|
-| Left goal (top post) | 0.000 | 0.365 | Top edge of left goal |
-| Left goal (bottom post) | 0.000 | 0.635 | Bottom edge of left goal |
-| Left penalty spot | 0.105 | 0.500 | 11m from goal line |
-| Center circle | 0.500 | 0.500 | Pitch center |
-| Right penalty spot | 0.895 | 0.500 | 11m from goal line |
-| Right goal (top post) | 1.000 | 0.365 | Top edge of right goal |
-| Right goal (bottom post) | 1.000 | 0.635 | Bottom edge of right goal |
+##### `get_all_player_ids() -> list[int]`
 
-## Dependencies
+Get tracker IDs for all detected players.
 
-- `ultralytics`
-- `supervision`
-- `transformers`
-- `umap-learn`
-- `scikit-learn`
-- `opencv-python`
-- `scipy`
-- `more-itertools`
-- `torch`
-- `numpy`
-- `roboflow`
+**Returns:**
+
+- List of player tracker IDs
+
+##### `get_all_team_ids() -> list[int]`
+
+Get all unique team IDs.
+
+**Returns:**
+
+- List of team IDs (typically [0, 1])
+
+##### `get_team_for_player(player_id: int) -> int`
+
+Get team ID for a specific player.
+
+**Parameters:**
+
+- `player_id`: Player tracker ID
+
+**Returns:**
+
+- Team ID (0 or 1)
+
+##### `save_csvs(output_path: str | Path) -> SaveResult`
+
+Export tracking data to CSV files (one per team).
+
+**Parameters:**
+
+- `output_path`: Directory path for output CSV files
+
+**Returns:**
+
+- `SaveResult`: Object containing success/failure information
+
+**CSV Format:**
+
+- Row 1: Team names
+- Row 2: Player IDs
+- Row 3: Column headers (Period, Frame, Time, Player coordinates, Ball coordinates)
+- Subsequent rows: Frame-by-frame tracking data with pitch coordinates
+
+**Example:**
+
+```python
+result = frames.save_csvs('./output')
+print(f"Saved: {result.successful_paths}")
+print(f"Errors: {result.errors}")
+```
+
+---
+
+#### `HeatmapGenerator`
+
+Generate spatial heatmaps for players and teams.
+
+```python
+HeatmapGenerator(
+    pitch_length: float = 105.0,
+    pitch_width: float = 68.0,
+    histogram_bins: tuple[int, int] = (50, 34),
+    kde_grid_size: tuple[int, int] = (100, 68)
+)
+```
+
+**Parameters:**
+
+- `pitch_length`: Pitch length in meters (default: 105.0)
+- `pitch_width`: Pitch width in meters (default: 68.0)
+- `histogram_bins`: (x_bins, y_bins) for histogram resolution
+- `kde_grid_size`: (x_points, y_points) for KDE grid resolution
+
+**Methods:**
+
+##### `player(frames: Frames, player_id: int, heatmap_type='both') -> Heatmap`
+
+Generate heatmap for a single player.
+
+**Parameters:**
+
+- `frames`: Frames object from detector
+- `player_id`: Player tracker ID
+- `heatmap_type`: One of "histogram", "kde", or "both"
+
+**Returns:**
+
+- `Heatmap`: Heatmap object with data
+
+##### `team(frames: Frames, team_id: int, heatmap_type='both') -> Heatmap`
+
+Generate aggregated heatmap for entire team.
+
+**Parameters:**
+
+- `frames`: Frames object from detector
+- `team_id`: Team ID (0 or 1)
+- `heatmap_type`: One of "histogram", "kde", or "both"
+
+**Returns:**
+
+- `Heatmap`: Heatmap object with data
+
+**Example:**
+
+```python
+gen = HeatmapGenerator(pitch_length=105.0, pitch_width=68.0)
+
+# Player heatmap
+player_hm = gen.player(frames, player_id=7, heatmap_type='both')
+player_hm.save('./heatmaps')
+
+# Team heatmap
+team_hm = gen.team(frames, team_id=0, heatmap_type='kde')
+team_hm.save('./heatmaps')
+```
+
+---
+
+#### `Heatmap`
+
+Container for heatmap data.
+
+**Attributes:**
+
+- `data`: Dictionary containing heatmap data
+- `identifier`: Player or team ID
+- `prefix`: Either "player" or "team"
+
+**Methods:**
+
+##### `save(output_path: str | Path, heatmap_type='both') -> SaveResult`
+
+Save heatmap data to JSON file(s).
+
+**Parameters:**
+
+- `output_path`: Directory path for output files
+- `heatmap_type`: One of "histogram", "kde", or "both"
+
+**Returns:**
+
+- `SaveResult`: Object containing success/failure information
+
+**Output Format:**
+
+- Histogram: `{prefix}_{identifier}_histogram.json`
+- KDE: `{prefix}_{identifier}_kde.json`
+
+**Example:**
+
+```python
+heatmap = gen.player(frames, player_id=10)
+result = heatmap.save('./output', heatmap_type='both')
+```
+
+---
+
+#### `SaveResult`
+
+Result object for save operations.
+
+**Attributes:**
+
+- `successful_paths`: List of successfully saved file paths
+- `failed_paths`: List of failed file paths
+- `errors`: List of error messages
+
+---
+
+### Utility Functions
+
+#### `set_stream_logger(name='wunderscout', level=logging.DEBUG, format_string=None)`
+
+Configure stream logging for WunderScout.
+
+**Parameters:**
+
+- `name`: Logger name (default: 'wunderscout')
+- `level`: Logging level (e.g., `logging.INFO`, `logging.DEBUG`)
+- `format_string`: Optional custom format string
+
+**Example:**
+
+```python
+import logging
+import wunderscout
+
+wunderscout.set_stream_logger('wunderscout', level=logging.INFO)
+```
+
+---
+
+## Complete Example
+
+```python
+import logging
+import wunderscout
+
+# Setup logging
+wunderscout.set_stream_logger(name='wunderscout', level=logging.INFO)
+
+# Initialize models
+models = wunderscout.Models(
+    player_weights='models/player_detection.pt',
+    field_weights='models/field_keypoints.pt'
+)
+
+# Create detector
+detector = wunderscout.Detector(models)
+
+# Process video
+frames = detector.run(
+    video_path='match.mp4',
+    output_dir='./annotated_videos'
+)
+
+# Get player and team information
+all_players = frames.get_all_player_ids()
+all_teams = frames.get_all_team_ids()
+
+print(f"Detected {len(all_players)} players across {len(all_teams)} teams")
+
+# Export tracking data
+csv_result = frames.save_csvs('./tracking_data')
+print(f"Exported CSV files: {csv_result.successful_paths}")
+
+# Generate heatmaps
+heatmap_gen = wunderscout.HeatmapGenerator()
+
+# Individual player heatmaps
+for player_id in all_players[:5]:  # First 5 players
+    team_id = frames.get_team_for_player(player_id)
+    heatmap = heatmap_gen.player(frames, player_id, heatmap_type='both')
+    heatmap.save(f'./heatmaps/player_{player_id}')
+
+# Team heatmaps
+for team_id in all_teams:
+    heatmap = heatmap_gen.team(frames, team_id, heatmap_type='kde')
+    heatmap.save(f'./heatmaps/team_{team_id}')
+
+print("Analysis complete!")
+```
+
+## Coordinate System
+
+WunderScout uses a normalized pitch coordinate system:
+
+- Origin (0, 0) at top-left corner
+- (1, 1) at bottom-right corner
+- Default pitch dimensions: 105m × 68m (standard FIFA pitch)
+
+Coordinates are transformed from image space to pitch space using homography matrices computed from detected field keypoints.
+
+## Limitations
+
+- Requires clear visibility of pitch markings for accurate coordinate mapping
+- Performance depends on quality of input video and model weights
+- Team classification may struggle with similar team colors
+- KDE heatmaps require minimum sample size and spatial variation
 
 ## License
 
-MIT
+MIT License
+
+## Acknowledgments
+
+Built with:
+
+- [Ultralytics YOLO](https://github.com/ultralytics/ultralytics)
+- [Supervision](https://github.com/roboflow/supervision)
+- [Transformers](https://github.com/huggingface/transformers)
+- [OpenCV](https://opencv.org/)
