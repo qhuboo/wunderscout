@@ -1,20 +1,21 @@
 import logging
 from .models import Models
-from .geometry import PitchMapper
-from .teams import TeamClassifier
 from .core import Detector
 from .heatmaps import HeatmapGenerator, Heatmap, HeatmapKey
+from .types import Frames, SaveResult, ClassId
 
 logging.getLogger("wunderscout").addHandler(logging.NullHandler())
 
 __all__ = [
     "Models",
-    "PitchMapper",
-    "TeamClassifier",
     "Detector",
     "HeatmapGenerator",
     "Heatmap",
     "HeatmapKey",
+    "Frames",
+    "SaveResult",
+    "ClassId",
+    "set_stream_logger",
 ]
 
 
