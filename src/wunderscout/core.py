@@ -27,7 +27,7 @@ class Detector:
         Validate video can be opened and read.
 
         Args:
-            video_path: Path to source video.
+            video_path: Path to source video file.
 
         Returns:
             tuple: (frame_count, fps, (width, height))
@@ -40,7 +40,7 @@ class Detector:
         logger.info("Validating video...")
 
         video_path = Path(video_path)
-        if not video_path.exists():
+        if not video_path.is_file():
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
         cap = cv2.VideoCapture(str(video_path))
@@ -97,13 +97,13 @@ class Detector:
 
         logger.info("Calibration successful.")
 
-    def run(self, video_path, save_video_path: str | Path | None = None) -> Frames:
+    def run(self, video_path, output_dir: str | Path | None = None) -> Frames:
         """
         Run detection and tracking on video.
 
         Args:
-            video_path: Path to input video.
-            save_video_path: Optional path to save annotated video.
+            video_path: Path to input video file.
+            output_dir: Optional dir path to save annotated video.
         Returns:
             Frames: Detection results for all frames.
 
@@ -112,6 +112,14 @@ class Detector:
             CalibrationError: If team calibration fails.
         """
         video_path = Path(video_path)
+
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+
+            if output_dir.is_file():
+                raise ValueError(
+                    f"output_dir must be a directory, not a file: {output_dir}."
+                )
 
         logger.info(f"Processing video: {video_path}")
 
@@ -237,13 +245,12 @@ class Detector:
 
             # --- G. OPTIONAL VIDEO ANNOTATION ---
             # Something is really wrong with this new detection, its absolutely awful. Ill return to this later.
-            if save_video_path is not None:
-                out_dir = Path(save_video_path)
-                out_dir.mkdir(parents=True, exist_ok=True)
+            if output_dir is not None:
+                output_dir.mkdir(parents=True, exist_ok=True)
 
                 orig_path = Path(video_path)
                 new_filename = f"{orig_path.stem}_annotated{orig_path.suffix}"
-                final_video_file = out_dir / new_filename
+                final_video_file = output_dir / new_filename
 
                 video_info = sv.VideoInfo.from_video_path(str(video_path))
                 render_generator = sv.get_video_frames_generator(str(video_path))
