@@ -24,12 +24,15 @@ class SaveResult:
     errors: list[str] = field(default_factory=list)
 
 
-@dataclass
 class Frames:
-    _detections: list[sv.Detections]
-    _player_team_map: dict[int, int] = field(init=False)
+    def __init__(self, detections=None):
+        """
+        Initialize Frames with a list of sv.Detections.
 
-    def __post_init__(self):
+        Args:
+            detections: List of sv.Detections objects, or None for empty Frames.
+        """
+        self._detections = detections if detections is not None else []
         self._player_team_map = self._build_player_team_map()
 
     def __len__(self):
@@ -41,7 +44,13 @@ class Frames:
     def __iter__(self):
         return iter(self._detections)
 
+    def __repr__(self):
+        return f"Frames({len(self._detections)} frames, {len(self._player_team_map)} players)"
+
     def _build_player_team_map(self):
+        if not self._detections:
+            return {}
+
         merged = sv.Detections.merge(self._detections)
         players = merged[merged.class_id == ClassId.PLAYER.value]
         player_team_map = {
