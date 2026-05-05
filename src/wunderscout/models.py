@@ -3,7 +3,6 @@ import torch
 from ultralytics import YOLO
 import supervision as sv
 from transformers import AutoProcessor, SiglipVisionModel
-from roboflow import Roboflow
 from more_itertools import chunked
 import numpy as np
 
