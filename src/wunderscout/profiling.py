@@ -16,9 +16,9 @@ class Profiler:
     def add_section(self, section_name: str, duration: float):
         self.section_times[section_name].append(duration)
 
-    def add_detections(self, num_detections: int, condifence: float):
+    def add_detections(self, num_detections: int, confidence: float):
         self.num_detections += num_detections
-        self.confidence_count += condifence
+        self.confidence_count += float(confidence)
 
     def report(self):
         return {

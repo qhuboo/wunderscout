@@ -278,10 +278,15 @@ class Detector:
                             )
 
                     merged = sv.Detections.merge([data_targets, ball_detections])
-                    self._profiler.add_detections(
-                        len(merged),
-                        merged.confidence.sum() if merged.confidence is not None else 0,
-                    )
+                    if self._profiler:
+                        self._profiler.add_detections(
+                            len(merged),
+                            float(
+                                merged.confidence.sum()
+                                if merged.confidence is not None
+                                else 0
+                            ),
+                        )
                     frames.append(merged)
 
                     # --- G. OPTIONAL VIDEO ANNOTATION ---
